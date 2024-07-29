@@ -1,0 +1,1154 @@
+---
+title: "zfBaP_behavior"
+author: "Alexandra Alexiev"
+date: "2023-10-20"
+output: md_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+# knit options for whole doc. I will add in specific chunks when I don't want this to be the case
+knitr::opts_chunk$set(echo = TRUE, # show code
+                      eval = TRUE, # do not run chunks when knitting
+                      include = TRUE, # include chunk input in final doc
+                      warning = FALSE, # do not show warnings in final doc
+                      message = FALSE, # do not show messages from code in final doc
+                      collapse = TRUE, # when possible, do put multiple outputs in one block
+                      dpi = 300, # fig resolution
+                      fig.dim = c(9, 5), # the default figure dimensions
+                      out.width = "98%", # the default figure output width
+                      out.height = "98%") # the default figure output height
+
+```
+
+## Housekeeping
+
+```{r libraries and paths}
+# libraries
+library(dplyr)
+library(tidyr)
+library(plyr)
+library(ggplot2)
+library(MASS)
+library(EnvStats)
+library(ggpubr)
+library(stringr)
+# set seed so stats like permanova are reproducible
+set.seed(3)
+
+# to knit an Rmd file, you need explicit file paths typed out, so I created these objects as shortcuts so I could call the object for commonly used file paths instead of retyping the whole thing each time
+home_dir <- "/Users/alexieva/Documents/Projects/Analysis/metagen_zfBaP/02_finalAnalysis/"
+input_dir <- "/Users/alexieva/Documents/Projects/Analysis/metagen_zfBaP/02_finalAnalysis/input_files_pub/"
+output_dir <- "/Users/alexieva/Documents/Projects/Analysis/metagen_zfBaP/02_finalAnalysis/output_files_pub/"
+
+```
+
+## Workflow summary (from Knecht et al., 2018 for adult behavior assays)
+Clean up data:
+- remove dead and morphologically deficient fish, rows of all 0's and/or NA's
+- truncate time period by removing first 5 min (when fish are acclimating to new environment) and last portion of time periods where some generations don't have data compared to others (so all generations have the same time endpoint)
+- change formatting of generation and treatment columns to be simpler
+
+Statistics
+
+This part is confusing because the Knecht et al adult learning paper does adult behavior assays like we did and claims to use a linear regression approach that references Lisa's paper, but the script Lisa sent with graphs looks consistent with the other Knecht et al paper (embryo and larval data) rather than the adult learning paper. That approach in Knecht et al transgenerational paper uses non-adult (embryo and larval) samples, just like Lisa's paper, so probably not 100% comparable to our samples. The curves we see here are also definitely not linear (they are S-shaped) in CDF, although they are normal and also could fit a gamma distribution. The image that Lisa last sent me to try to recreate was also from the Transgenerational paper, not the adult learning one. So below, I've done the transgenerational paper approach but I'm not sure if that was correct and need clarification.
+
+
+Knecht et al., transgenerational paper approach:
+- test assumptions of statistical model are met: double truncated gamma distribution, non-normal
+- identify statistical outliers
+- graph eCDF of each test group (treatment per generation)
+- stats significance determined with (independent samples) Kolmogorov-Smirnov test comparing exposed to control
+- stats were computed as time-averaged differences between individual time series and corresponding mean control response over the truncated time interval
+
+Knecht et al., adult learning paper approach:
+- test if normal and linear
+- ANOVA with Tukey's HSD used to compare between regression lines (intercepts and slopes for each parameter)
+
+
+## Read in and clean up data
+- Lisa already removed dead or morphologically deficient fish
+
+## Freeswim
+- measured in distance (cm)
+```{r data cleanup freeswim}
+# behavior data: freeswim
+freeswim <- read.csv(file = paste0(input_dir, "freeswim_allCLEAN.csv"), 
+                           header = TRUE)
+freeswim <-  mutate(freeswim, "group" = paste0(freeswim$generation, "_", freeswim$treatment))
+freeswim$MeanPerFish <- apply(freeswim[,4:(length(freeswim)-1)], 1, mean, na.rm = TRUE)
+which(freeswim$MeanPerFish == 0) # none
+freeswim <- subset(freeswim, select = -c(T0:T10, T20:T28)) # truncate time period
+
+freeswim_long <- freeswim %>%
+  mutate("FishNumber" = 1:nrow(freeswim)) %>% # add fish number
+  # dplyr::filter(MeanPerFish > 0) %>% # filter out fish with a row mean of zero
+  gather(timepoint, Distance, T11:T19, factor_key = T) # from wide to long data type
+
+ggplot(data = freeswim_long, 
+       aes(x = timepoint, y = Distance, group = FishNumber)) +
+  geom_line(aes(color = generation), alpha = 0.3) +
+  facet_wrap(~ treatment, ncol = 2)
+
+```
+
+- take out outliers per group using IQR method (this is code from Ebony Stretch that I modified into dplyr code)
+```{r IQR freeswim}
+# calculating the quartiles for each group
+freeswim_quartiles <- freeswim_long %>%
+  group_by(group) %>%
+  group_modify(~ {
+     quantile(.x$MeanPerFish, probs = c(0.25, 0.75)) %>%
+     tibble::enframe(name = "prob", value = "quantile") %>%
+     spread(prob, quantile)
+  }) %>%
+  mutate(IQR = `75%` - `25%`,
+         lower = `25%` - (1.5 * IQR),
+         upper = `75%` + (1.5 * IQR)) %>%
+  dplyr::select(c(group, lower, upper)) %>%
+  full_join(freeswim_long, by = "group", multiple = "all") %>%
+  ungroup() %>%
+  as.data.frame()
+
+# subset 
+freeswim_long_outlierd <- subset(freeswim_quartiles, freeswim_quartiles$MeanPerFish > freeswim_quartiles$lower & freeswim_quartiles$MeanPerFish < freeswim_quartiles$upper)
+str(freeswim_long)
+str(freeswim_long_outlierd)
+# some were removed so use the outlier removed file moving forward
+
+```
+
+
+## Shoaling: nearest-neighbor distance
+- The nearest-neighbor distance is the average of the nearest fish to each of the four fish in the shoal
+```{r data cleanup shoaling nnd}
+# behavior data: shoaling nnd
+shoal_nnd <- read.csv(file = paste0(input_dir, "shoalingnnd_allCLEAN.csv"),
+                           header = TRUE)
+shoal_nnd <-  mutate(shoal_nnd, "group" = paste0(shoal_nnd$generation, "_", shoal_nnd$treatment))
+shoal_nnd$MeanPerFish <- apply(shoal_nnd[,4:(length(shoal_nnd)-1)], 1, mean, na.rm = TRUE)
+which(shoal_nnd$MeanPerFish == 0) # none
+shoal_nnd <- subset(shoal_nnd, select = -c(T1:T10, T20:T23)) # truncate time period
+
+# double check with line graphs of each fish's movement
+shoal_nnd_long <- shoal_nnd %>%
+  mutate("FishNumber" = 1:nrow(shoal_nnd)) %>% # add fish number
+  gather(timepoint, NearestNeighborDist, T11:T19, factor_key = T) # from wide to long data type
+
+ggplot(data = shoal_nnd_long, 
+       aes(x = timepoint, y = NearestNeighborDist, group = FishNumber)) +
+  geom_line(aes(color = generation), alpha = 0.3) +
+  facet_wrap(~ treatment, ncol = 2)
+# weird low and high set of fish dependent on generation, but Lisa said this could be biologically expected based on previous studies they've done at SARL
+
+```
+
+- take out outliers per group using IQR method (this is code from Ebony Stretch that I modified into dplyr code)
+```{r IQR shoal_nnd}
+# calculating the quartiles for each group
+shoal_nnd_quartiles <- shoal_nnd_long %>%
+  group_by(group) %>%
+  group_modify(~ {
+     quantile(.x$MeanPerFish, probs = c(0.25, 0.75)) %>%
+     tibble::enframe(name = "prob", value = "quantile") %>%
+     spread(prob, quantile)
+  }) %>%
+  mutate(IQR = `75%` - `25%`,
+         lower = `25%` - (1.5 * IQR),
+         upper = `75%` + (1.5 * IQR)) %>%
+  dplyr::select(c(group, lower, upper)) %>%
+  full_join(shoal_nnd_long, by = "group", multiple = "all") %>%
+  ungroup() %>%
+  as.data.frame()
+
+# subset 
+shoal_nnd_long_outlierd <- subset(shoal_nnd_quartiles, shoal_nnd_quartiles$MeanPerFish > shoal_nnd_quartiles$lower & shoal_nnd_quartiles$MeanPerFish < shoal_nnd_quartiles$upper)
+str(shoal_nnd_long)
+str(shoal_nnd_long_outlierd)
+# some were removed so use the outlier removed file moving forward
+
+```
+
+## Shoaling: inter-individual distance
+- the inter-individual distance is the average distance between all four fish to each of the remaining 3 fish within the shoal
+```{r data cleanup shoaling iid}
+# behavior data: shoaling iid
+shoal_iid <- read.csv(file = paste0(input_dir, "shoalingiid_allCLEAN.csv"),
+                           header = TRUE)
+shoal_iid <-  mutate(shoal_iid, "group" = paste0(shoal_iid$generation, "_", shoal_iid$treatment))
+shoal_iid$MeanPerFish <- apply(shoal_iid[,4:(length(shoal_iid)-1)], 1, mean, na.rm = TRUE)
+which(shoal_iid$MeanPerFish == 0) # no zero's in this data
+shoal_iid <- subset(shoal_iid, select = -c(T0:T10, T20:T28)) # truncate time period
+
+# double check with line graphs of each fish's movement
+shoal_iid_long <- shoal_iid %>%
+  mutate("FishNumber" = 1:nrow(shoal_iid)) %>% # add fish number
+  gather(timepoint, InterIndivDist, T11:T19, factor_key = T) # from wide to long data type
+
+ggplot(data = shoal_iid_long, 
+       aes(x = timepoint, y = InterIndivDist, group = FishNumber)) +
+  geom_line(aes(color = generation), alpha = 0.3) +
+  facet_wrap(~ treatment, ncol = 2)
+# same situation as nnd, there is a low and high set of fish
+
+```
+
+- take out outliers per group using IQR method (this is code from Ebony Stretch that I modified into dplyr code)
+```{r IQR shoal_iid}
+# calculating the quartiles for each group
+shoal_iid_quartiles <- shoal_iid_long %>%
+  group_by(group) %>%
+  group_modify(~ {
+     quantile(.x$MeanPerFish, probs = c(0.25, 0.75)) %>%
+     tibble::enframe(name = "prob", value = "quantile") %>%
+     spread(prob, quantile)
+  }) %>%
+  mutate(IQR = `75%` - `25%`,
+         lower = `25%` - (1.5 * IQR),
+         upper = `75%` + (1.5 * IQR)) %>%
+  dplyr::select(c(group, lower, upper)) %>%
+  full_join(shoal_iid_long, by = "group", multiple = "all") %>%
+  ungroup() %>%
+  as.data.frame()
+
+# subset 
+shoal_iid_long_outlierd <- subset(shoal_iid_quartiles, shoal_iid_quartiles$MeanPerFish > shoal_iid_quartiles$lower & shoal_iid_quartiles$MeanPerFish < shoal_iid_quartiles$upper)
+str(shoal_iid_long)
+str(shoal_iid_long_outlierd)
+# some were removed so use the outlier removed file moving forward
+
+```
+
+## Shoaling: speed
+- average speed of all four fish within the shoal
+```{r data cleanup shoaling speed}
+# behavior data: shoaling speed
+shoal_speed <- read.csv(file = paste0(input_dir, "shoalingspeed_allCLEAN.csv"),
+                           header = TRUE)
+shoal_speed <- mutate(shoal_speed, "group" = paste0(shoal_speed$generation, "_", shoal_speed$treatment))
+shoal_speed$MeanPerFish <- apply(shoal_speed[,4:(length(shoal_speed)-1)], 1, mean, na.rm = TRUE)
+which(shoal_speed$MeanPerFish == 0) # no zero's in this data
+shoal_speed <- subset(shoal_speed, select = -c(T0:T10, T20:T28)) # truncate time period
+
+# double check with line graphs of each fish's movement
+shoal_speed_long <- shoal_speed %>%
+  mutate("FishNumber" = 1:nrow(shoal_speed)) %>% # add fish number
+  gather(timepoint, speed, T11:T19, factor_key = T) # from wide to long data type
+
+ggplot(data = shoal_speed_long, 
+       aes(x = timepoint, y = speed, group = FishNumber)) +
+  geom_line(aes(color = generation), alpha = 0.3) +
+  facet_wrap(~ treatment, ncol = 2)
+
+# same pattern as above, high and low grouping of fish
+# also more noise with these very high peaks on a few fish that might be outliers
+
+```
+
+- take out outliers per group using IQR method (this is code from Ebony Stretch that I modified into dplyr code)
+```{r IQR shoal_speed}
+# calculating the quartiles for each group
+shoal_speed_quartiles <- shoal_speed_long %>%
+  group_by(group) %>%
+  group_modify(~ {
+     quantile(.x$MeanPerFish, probs = c(0.25, 0.75)) %>%
+     tibble::enframe(name = "prob", value = "quantile") %>%
+     spread(prob, quantile)
+  }) %>%
+  mutate(IQR = `75%` - `25%`,
+         lower = `25%` - (1.5 * IQR),
+         upper = `75%` + (1.5 * IQR)) %>%
+  dplyr::select(c(group, lower, upper)) %>%
+  full_join(shoal_speed_long, by = "group", multiple = "all") %>%
+  ungroup() %>%
+  as.data.frame()
+
+# subset 
+shoal_speed_long_outlierd <- subset(shoal_speed_quartiles, shoal_speed_quartiles$MeanPerFish > shoal_speed_quartiles$lower & shoal_speed_quartiles$MeanPerFish < shoal_speed_quartiles$upper)
+str(shoal_speed_long)
+str(shoal_speed_long_outlierd)
+# some were removed so use the outlier removed file moving forward
+
+```
+
+
+## Statistical analysis: two sample Kolmogorov-Smirnov test 
+- Statistical significance determined with two-sample Kolmogorov-Smirnov test comparing experimental treatments (AHRMo_BaP, AHRMo_DMSO, CoMo _BaP) to control (	
+CoMo_DMSO)
+- Null hypothesis: two distributions were drawn from the same continuous distribution 
+- p-value <= 0.05 means reject this null and therefore distributions are from different sources (so experimental behavior is atypical compared to control behavior measure)
+- using "two-sided" as the alternative because we don't actually know if treatment distributions will be to the left or right of the control (less or greater); anything not like the control would be considered atypical behavior
+- stats were computed as time-averaged differences between individual time series and corresponding mean control response over the specified time interval
+
+## Freeswim
+- test assumptions of statistical model are met: non-normal data, f(x) is non-decreasing and right-continuous
+```{r test assumptions}
+# check normality assumption/what type of distribution
+# histogram (for all distances pooled across time points)
+mu_freeswim <- ddply(freeswim_long_outlierd, .(generation, treatment), summarise, 
+                     grp.mean = mean(Distance, na.rm = TRUE))
+mu_freeswim
+
+ggplot(data = freeswim_long_outlierd, 
+       aes(x = Distance, color = generation, fill = generation)) +
+  geom_histogram(aes(y = after_stat(density)), position = "identity", alpha = 0.2) +
+  geom_vline(data = mu_freeswim, aes(xintercept = grp.mean, color = generation),
+           linetype = "dashed") +
+  geom_density(alpha = 0.1) + 
+  facet_wrap(~ treatment, ncol = 2)
+
+```
+
+- Two sample K-S test comparing experimental treatments to control group where p-value <= 0.05 means the two data sets likely came from different distributions
+```{r Kolmogorov-Smironov test freeswim}
+# summary list for full stats for easy reference later
+ks_freeswimsmry <- c()
+
+## F0 generation tests
+
+# K-S test comparing CoMo_DMSO to CoMo_BaP
+ks_freeswimsmry$F0_BaPeffect <- ks.test(freeswim_long_outlierd$Distance[freeswim_long_outlierd$group %in% "F0_CoMo_DMSO"],
+                                   freeswim_long_outlierd$Distance[freeswim_long_outlierd$group %in% "F0_CoMo _BaP"]) # not from different distributions
+
+# K-S test comparing CoMo_DMSO to AhR2_DMSO
+ks_freeswimsmry$F0_AhR2effect <- ks.test(freeswim_long_outlierd$Distance[freeswim_long_outlierd$group %in% "F0_CoMo_DMSO"],
+                                   freeswim_long_outlierd$Distance[freeswim_long_outlierd$group %in% "F0_AHRMo_DMSO"]) # not from different distributions
+
+# K-S test comparing CoMo_DMSO to AhR2_BaP
+ks_freeswimsmry$F0_intereffect <- ks.test(freeswim_long_outlierd$Distance[freeswim_long_outlierd$group %in% "F0_CoMo_DMSO"],
+                                   freeswim_long_outlierd$Distance[freeswim_long_outlierd$group %in% "F0_AHRMo_BaP"]) # from different distributions
+
+
+## F1 generation tests
+
+# K-S test comparing CoMo_DMSO to CoMo_BaP
+ks_freeswimsmry$F1_BaPeffect <- ks.test(freeswim_long_outlierd$Distance[freeswim_long_outlierd$group %in% "F1_CoMo_DMSO"],
+                                   freeswim_long_outlierd$Distance[freeswim_long_outlierd$group %in% "F1_CoMo _BaP"]) # not from different distributions
+
+# K-S test comparing CoMo_DMSO to AhR2_DMSO
+ks_freeswimsmry$F1_AhR2effect <- ks.test(freeswim_long_outlierd$Distance[freeswim_long_outlierd$group %in% "F1_CoMo_DMSO"],
+                                   freeswim_long_outlierd$Distance[freeswim_long_outlierd$group %in% "F1_AHRMo_DMSO"]) # from different distributions
+
+# K-S test comparing CoMo_DMSO to AhR2_BaP
+ks_freeswimsmry$F1_intereffect <- ks.test(freeswim_long_outlierd$Distance[freeswim_long_outlierd$group %in% "F1_CoMo_DMSO"],
+                                   freeswim_long_outlierd$Distance[freeswim_long_outlierd$group %in% "F1_AHRMo_BaP"]) # not from different distributions
+
+
+## F2 generation tests
+
+# K-S test comparing CoMo_DMSO to CoMo_BaP
+ks_freeswimsmry$F2_BaPeffect <- ks.test(freeswim_long_outlierd$Distance[freeswim_long_outlierd$group %in% "F2_CoMo_DMSO"],
+                                   freeswim_long_outlierd$Distance[freeswim_long_outlierd$group %in% "F2_CoMo _BaP"]) # not from different distributions
+
+# K-S test comparing CoMo_DMSO to AhR2_DMSO
+ks_freeswimsmry$F2_AhR2effect <- ks.test(freeswim_long_outlierd$Distance[freeswim_long_outlierd$group %in% "F2_CoMo_DMSO"],
+                                   freeswim_long_outlierd$Distance[freeswim_long_outlierd$group %in% "F2_AHRMo_DMSO"]) # not from different distributions
+
+# K-S test comparing CoMo_DMSO to AhR2_BaP
+ks_freeswimsmry$F2_intereffect <- ks.test(freeswim_long_outlierd$Distance[freeswim_long_outlierd$group %in% "F2_CoMo_DMSO"],
+                                   freeswim_long_outlierd$Distance[freeswim_long_outlierd$group %in% "F2_AHRMo_BaP"]) # from different distributions
+
+```
+
+```{r make stat results summary table freeswim}
+## make summary data frame of just the useful stats for publishing
+# list of test stats
+ksfreeswim_teststats <- c(ks_freeswimsmry$F0_BaPeffect$statistic, 
+                          ks_freeswimsmry$F0_AhR2effect$statistic,
+                          ks_freeswimsmry$F0_intereffect$statistic,
+                          ks_freeswimsmry$F1_BaPeffect$statistic, 
+                          ks_freeswimsmry$F1_AhR2effect$statistic,
+                          ks_freeswimsmry$F1_intereffect$statistic, 
+                          ks_freeswimsmry$F2_BaPeffect$statistic, 
+                          ks_freeswimsmry$F2_AhR2effect$statistic,
+                          ks_freeswimsmry$F2_intereffect$statistic)
+# list of p-values
+ksfreeswim_pvals <- c(ks_freeswimsmry$F0_BaPeffect$p.value, 
+                          ks_freeswimsmry$F0_AhR2effect$p.value,
+                          ks_freeswimsmry$F0_intereffect$p.value,
+                          ks_freeswimsmry$F1_BaPeffect$p.value, 
+                          ks_freeswimsmry$F1_AhR2effect$p.value,
+                          ks_freeswimsmry$F1_intereffect$p.value, 
+                          ks_freeswimsmry$F2_BaPeffect$p.value, 
+                          ks_freeswimsmry$F2_AhR2effect$p.value,
+                          ks_freeswimsmry$F2_intereffect$p.value)
+
+# data frame of all summary stats of KS test for quick, easy reference and publishing
+ks_freeswimsmry_short <- data.frame("Generation" = c(rep("F0", 3), rep("F1", 3), rep("F2", 3)),
+                                    "Experimental_treatment_group" = c(rep(c("AhR2Mo - / BaP +", "AhR2Mo + / BaP -", "AhR2Mo + / BaP +"), 3)), 
+                                    "Test_statistic" = ksfreeswim_teststats,
+                                    "P_values" = ksfreeswim_pvals)
+ks_freeswimsmry_short$signif <- apply(ks_freeswimsmry_short, 1, 
+                               function(x) {ifelse(x[["P_values"]] <= 0.05, "*", "ns")})
+ks_freeswimsmry_short
+
+```
+
+- graphing the eCDF by generation with lines as treatments
+```{r CDF graph for freeswim data}
+freeswim_cdf_plot <- ggplot(freeswim_long_outlierd, aes(x = Distance, color = treatment)) +
+  stat_ecdf(geom = "step") +
+  theme_classic() +
+  facet_wrap("generation") +
+  labs(x = "Freeswim Distance", y = "Time (min)", color = "Treatment") +
+  scale_color_brewer(palette = "PuOr", 
+                     name = "Treatments", 
+                    labels = c("AhR2Mo + / BaP +",
+                                 "AhR2Mo + / BaP -",
+                                 "AhR2Mo - / BaP +",
+                                 "AhR2Mo - / BaP -"))
+freeswim_cdf_plot
+
+```
+
+## Shoaling: nearest-neighbor distance
+- The nearest-neighbor distance is the average of the nearest fish to each of the four fish in the shoal
+```{r test assumptions and check distribution shoaling nnd}
+# check normality assumption/what type of distribution
+# histogram (for all distances pooled across time points)
+mu_shoal_nnd <- ddply(shoal_nnd_long_outlierd, .(generation, treatment), summarise, 
+                     grp.mean = mean(NearestNeighborDist, na.rm = TRUE))
+mu_shoal_nnd
+
+ggplot(data = shoal_nnd_long_outlierd, 
+       aes(x = NearestNeighborDist, color = generation, fill = generation)) +
+  geom_histogram(aes(y = ..density..), position = "identity", alpha = 0.2) +
+  geom_vline(data = mu_shoal_nnd, aes(xintercept = grp.mean, color = generation),
+           linetype = "dashed") +
+  geom_density(alpha = 0.1) + 
+  facet_wrap(~ treatment, ncol = 2)
+
+```
+
+- Two sample K-S test comparing experimental treatments to control group where p-value <= 0.05 means the two data sets likely came from different distributions
+```{r Kolmogorov-Smironov test shoaling nnd}
+# summary list for full stats for easy reference later
+ks_shoal_nndsmry <- c()
+
+## F0 generation tests
+
+# K-S test comparing CoMo_DMSO to CoMo_BaP
+ks_shoal_nndsmry$F0_BaPeffect <- ks.test(shoal_nnd_long_outlierd$NearestNeighborDist[shoal_nnd_long_outlierd$group %in% "F0_CoMo_DMSO"],
+                                   shoal_nnd_long_outlierd$NearestNeighborDist[shoal_nnd_long_outlierd$group %in% "F0_CoMo_BaP"]) # from different distributions
+
+# K-S test comparing CoMo_DMSO to AhR2_DMSO
+ks_shoal_nndsmry$F0_AhR2effect <- ks.test(shoal_nnd_long_outlierd$NearestNeighborDist[shoal_nnd_long_outlierd$group %in% "F0_CoMo_DMSO"],
+                                   shoal_nnd_long_outlierd$NearestNeighborDist[shoal_nnd_long_outlierd$group %in% "F0_AHRMo_DMSO"]) # not from different distributions
+
+# K-S test comparing CoMo_DMSO to AhR2_BaP
+ks_shoal_nndsmry$F0_intereffect <- ks.test(shoal_nnd_long_outlierd$NearestNeighborDist[shoal_nnd_long_outlierd$group %in% "F0_CoMo_DMSO"],
+                                   shoal_nnd_long_outlierd$NearestNeighborDist[shoal_nnd_long_outlierd$group %in% "F0_AHRMo_BaP"]) # not from different distributions
+
+
+## F1 generation tests
+
+# K-S test comparing CoMo_DMSO to CoMo_BaP
+ks_shoal_nndsmry$F1_BaPeffect <- ks.test(shoal_nnd_long_outlierd$NearestNeighborDist[shoal_nnd_long_outlierd$group %in% "F1_CoMo_DMSO"],
+                                   shoal_nnd_long_outlierd$NearestNeighborDist[shoal_nnd_long_outlierd$group %in% "F1_CoMo_BaP"]) # not from different distributions
+
+# K-S test comparing CoMo_DMSO to AhR2_DMSO
+ks_shoal_nndsmry$F1_AhR2effect <- ks.test(shoal_nnd_long_outlierd$NearestNeighborDist[shoal_nnd_long_outlierd$group %in% "F1_CoMo_DMSO"],
+                                   shoal_nnd_long_outlierd$NearestNeighborDist[shoal_nnd_long_outlierd$group %in% "F1_AHRMo_DMSO"]) # from different distributions
+
+# K-S test comparing CoMo_DMSO to AhR2_BaP
+ks_shoal_nndsmry$F1_intereffect <- ks.test(shoal_nnd_long_outlierd$NearestNeighborDist[shoal_nnd_long_outlierd$group %in% "F1_CoMo_DMSO"],
+                                   shoal_nnd_long_outlierd$NearestNeighborDist[shoal_nnd_long_outlierd$group %in% "F1_AHRMo_BaP"]) # from different distributions
+
+
+## F2 generation tests
+
+# K-S test comparing CoMo_DMSO to CoMo_BaP
+ks_shoal_nndsmry$F2_BaPeffect <- ks.test(shoal_nnd_long_outlierd$NearestNeighborDist[shoal_nnd_long_outlierd$group %in% "F2_CoMo_DMSO"],
+                                   shoal_nnd_long_outlierd$NearestNeighborDist[shoal_nnd_long_outlierd$group %in% "F2_CoMo_BaP"]) # not from different distributions
+
+# K-S test comparing CoMo_DMSO to AhR2_DMSO
+ks_shoal_nndsmry$F2_AhR2effect <- ks.test(shoal_nnd_long_outlierd$NearestNeighborDist[shoal_nnd_long_outlierd$group %in% "F2_CoMo_DMSO"],
+                                   shoal_nnd_long_outlierd$NearestNeighborDist[shoal_nnd_long_outlierd$group %in% "F2_AHRMo_DMSO"]) # from different distributions
+
+# K-S test comparing CoMo_DMSO to AhR2_BaP
+ks_shoal_nndsmry$F2_intereffect <- ks.test(shoal_nnd_long_outlierd$NearestNeighborDist[shoal_nnd_long_outlierd$group %in% "F2_CoMo_DMSO"],
+                                   shoal_nnd_long_outlierd$NearestNeighborDist[shoal_nnd_long_outlierd$group %in% "F2_AHRMo_BaP"]) # from different distributions
+
+```
+
+```{r make stat results summary table shoaling nnd}
+## make summary data frame of just the useful stats for publishing
+# list of test stats
+ksshoal_nnd_teststats <- c(ks_shoal_nndsmry$F0_BaPeffect$statistic, 
+                          ks_shoal_nndsmry$F0_AhR2effect$statistic,
+                          ks_shoal_nndsmry$F0_intereffect$statistic,
+                          ks_shoal_nndsmry$F1_BaPeffect$statistic, 
+                          ks_shoal_nndsmry$F1_AhR2effect$statistic,
+                          ks_shoal_nndsmry$F1_intereffect$statistic, 
+                          ks_shoal_nndsmry$F2_BaPeffect$statistic, 
+                          ks_shoal_nndsmry$F2_AhR2effect$statistic,
+                          ks_shoal_nndsmry$F2_intereffect$statistic)
+# list of p-values
+ksshoal_nnd_pvals <- c(ks_shoal_nndsmry$F0_BaPeffect$p.value, 
+                          ks_shoal_nndsmry$F0_AhR2effect$p.value,
+                          ks_shoal_nndsmry$F0_intereffect$p.value,
+                          ks_shoal_nndsmry$F1_BaPeffect$p.value, 
+                          ks_shoal_nndsmry$F1_AhR2effect$p.value,
+                          ks_shoal_nndsmry$F1_intereffect$p.value, 
+                          ks_shoal_nndsmry$F2_BaPeffect$p.value, 
+                          ks_shoal_nndsmry$F2_AhR2effect$p.value,
+                          ks_shoal_nndsmry$F2_intereffect$p.value)
+
+# data frame of all summary stats of KS test for quick, easy reference and publishing
+ks_shoal_nndsmry_short <- data.frame("Generation" = c(rep("F0", 3), rep("F1", 3), rep("F2", 3)),
+                                    "Experimental_treatment_group" = c(rep(c("AhR2Mo - / BaP +", "AhR2Mo + / BaP -", "AhR2Mo + / BaP +"), 3)), 
+                                    "Test_statistic" = ksshoal_nnd_teststats,
+                                    "P_values" = ksshoal_nnd_pvals)
+ks_shoal_nndsmry_short$signif <- apply(ks_shoal_nndsmry_short, 1, 
+                               function(x) {ifelse(x[["P_values"]] <= 0.05, "*", "ns")})
+ks_shoal_nndsmry_short
+
+```
+
+- graphing the eCDF by generation with lines as treatments
+```{r CDF graph for shoaling nnd data}
+shoal_nnd_cdf_plot <- ggplot(shoal_nnd_long_outlierd, aes(x = NearestNeighborDist, 
+                                                          color = treatment)) +
+  stat_ecdf(geom = "step") +
+  theme_classic() +
+  facet_wrap("generation") +
+  labs(x = "Shoaling Nearest Neighbor Distance", 
+       y = "Time (min)", 
+       color = "Treatment") +
+  scale_color_brewer(palette = "PuOr", 
+                     name = "Treatments", 
+                    labels = c("AhR2Mo + / BaP +",
+                                 "AhR2Mo + / BaP -",
+                                 "AhR2Mo - / BaP +",
+                                 "AhR2Mo - / BaP -"))
+shoal_nnd_cdf_plot
+
+```
+
+## Shoaling: inter-individual distance
+- the inter-individual distance is the average distance between all four fish to each of the remaining 3 fish within the shoal
+```{r test assumptions and check distribution shoaling iid}
+# check normality assumption/what type of distribution
+# histogram (for all distances pooled across time points)
+mu_shoal_iid <- ddply(shoal_iid_long_outlierd, .(generation, treatment), summarise, 
+                     grp.mean = mean(InterIndivDist, na.rm = TRUE))
+mu_shoal_iid
+
+ggplot(data = shoal_iid_long_outlierd, 
+       aes(x = InterIndivDist, color = generation, fill = generation)) +
+  geom_histogram(aes(y = ..density..), position = "identity", alpha = 0.2) +
+  geom_vline(data = mu_shoal_iid, aes(xintercept = grp.mean, color = generation),
+           linetype = "dashed") +
+  geom_density(alpha = 0.1) + 
+  facet_wrap(~ treatment, ncol = 2)
+
+```
+
+- Two sample K-S test comparing experimental treatments to control group where p-value <= 0.05 means the two data sets likely came from different distributions
+```{r Kolmogorov-Smironov test shoaling iid}
+# summary list for full stats for easy reference later
+ks_shoal_iidsmry <- c()
+
+## F0 generation tests
+
+# K-S test comparing CoMo_DMSO to CoMo_BaP
+ks_shoal_iidsmry$F0_BaPeffect <- ks.test(shoal_iid_long_outlierd$InterIndivDist[shoal_iid_long_outlierd$group %in% "F0_CoMo_DMSO"],
+                                   shoal_iid_long_outlierd$InterIndivDist[shoal_iid_long_outlierd$group %in% "F0_CoMo _BaP"]) # not from different distributions
+
+# K-S test comparing CoMo_DMSO to AhR2_DMSO
+ks_shoal_iidsmry$F0_AhR2effect <- ks.test(shoal_iid_long_outlierd$InterIndivDist[shoal_iid_long_outlierd$group %in% "F0_CoMo_DMSO"],
+                                   shoal_iid_long_outlierd$InterIndivDist[shoal_iid_long_outlierd$group %in% "F0_AHRMo_DMSO"]) # from different distributions
+
+# K-S test comparing CoMo_DMSO to AhR2_BaP
+ks_shoal_iidsmry$F0_intereffect <- ks.test(shoal_iid_long_outlierd$InterIndivDist[shoal_iid_long_outlierd$group %in% "F0_CoMo_DMSO"],
+                                   shoal_iid_long_outlierd$InterIndivDist[shoal_iid_long_outlierd$group %in% "F0_AHRMo_BaP"]) # not from different distributions
+
+
+## F1 generation tests
+
+# K-S test comparing CoMo_DMSO to CoMo_BaP
+ks_shoal_iidsmry$F1_BaPeffect <- ks.test(shoal_iid_long_outlierd$InterIndivDist[shoal_iid_long_outlierd$group %in% "F1_CoMo_DMSO"],
+                                   shoal_iid_long_outlierd$InterIndivDist[shoal_iid_long_outlierd$group %in% "F1_CoMo _BaP"]) # not from different distributions
+
+# K-S test comparing CoMo_DMSO to AhR2_DMSO
+ks_shoal_iidsmry$F1_AhR2effect <- ks.test(shoal_iid_long_outlierd$InterIndivDist[shoal_iid_long_outlierd$group %in% "F1_CoMo_DMSO"],
+                                   shoal_iid_long_outlierd$InterIndivDist[shoal_iid_long_outlierd$group %in% "F1_AHRMo_DMSO"]) # from different distributions
+
+# K-S test comparing CoMo_DMSO to AhR2_BaP
+ks_shoal_iidsmry$F1_intereffect <- ks.test(shoal_iid_long_outlierd$InterIndivDist[shoal_iid_long_outlierd$group %in% "F1_CoMo_DMSO"],
+                                   shoal_iid_long_outlierd$InterIndivDist[shoal_iid_long_outlierd$group %in% "F1_AHRMo_BaP"]) # not from different distributions
+
+
+## F2 generation tests
+
+# K-S test comparing CoMo_DMSO to CoMo_BaP
+ks_shoal_iidsmry$F2_BaPeffect <- ks.test(shoal_iid_long_outlierd$InterIndivDist[shoal_iid_long_outlierd$group %in% "F2_CoMo_DMSO"],
+                                   shoal_iid_long_outlierd$InterIndivDist[shoal_iid_long_outlierd$group %in% "F2_CoMo _BaP"]) # not from different distributions
+
+# K-S test comparing CoMo_DMSO to AhR2_DMSO
+ks_shoal_iidsmry$F2_AhR2effect <- ks.test(shoal_iid_long_outlierd$InterIndivDist[shoal_iid_long_outlierd$group %in% "F2_CoMo_DMSO"],
+                                   shoal_iid_long_outlierd$InterIndivDist[shoal_iid_long_outlierd$group %in% "F2_AHRMo_DMSO"]) # not from different distributions
+
+# K-S test comparing CoMo_DMSO to AhR2_BaP
+ks_shoal_iidsmry$F2_intereffect <- ks.test(shoal_iid_long_outlierd$InterIndivDist[shoal_iid_long_outlierd$group %in% "F2_CoMo_DMSO"],
+                                   shoal_iid_long_outlierd$InterIndivDist[shoal_iid_long_outlierd$group %in% "F2_AHRMo_BaP"]) # from different distributions
+
+```
+
+```{r make stat results summary table shoaling iid}
+## make summary data frame of just the useful stats for publishing
+# list of test stats
+ksshoal_iid_teststats <- c(ks_shoal_iidsmry$F0_BaPeffect$statistic, 
+                          ks_shoal_iidsmry$F0_AhR2effect$statistic,
+                          ks_shoal_iidsmry$F0_intereffect$statistic,
+                          ks_shoal_iidsmry$F1_BaPeffect$statistic, 
+                          ks_shoal_iidsmry$F1_AhR2effect$statistic,
+                          ks_shoal_iidsmry$F1_intereffect$statistic, 
+                          ks_shoal_iidsmry$F2_BaPeffect$statistic, 
+                          ks_shoal_iidsmry$F2_AhR2effect$statistic,
+                          ks_shoal_iidsmry$F2_intereffect$statistic)
+# list of p-values
+ksshoal_iid_pvals <- c(ks_shoal_iidsmry$F0_BaPeffect$p.value, 
+                          ks_shoal_iidsmry$F0_AhR2effect$p.value,
+                          ks_shoal_iidsmry$F0_intereffect$p.value,
+                          ks_shoal_iidsmry$F1_BaPeffect$p.value, 
+                          ks_shoal_iidsmry$F1_AhR2effect$p.value,
+                          ks_shoal_iidsmry$F1_intereffect$p.value, 
+                          ks_shoal_iidsmry$F2_BaPeffect$p.value, 
+                          ks_shoal_iidsmry$F2_AhR2effect$p.value,
+                          ks_shoal_iidsmry$F2_intereffect$p.value)
+
+# data frame of all summary stats of KS test for quick, easy reference and publishing
+ks_shoal_iidsmry_short <- data.frame("Generation" = c(rep("F0", 3), rep("F1", 3), rep("F2", 3)),
+                                    "Experimental_treatment_group" = c(rep(c("AhR2Mo - / BaP +", "AhR2Mo + / BaP -", "AhR2Mo + / BaP +"), 3)), 
+                                    "Test_statistic" = ksshoal_iid_teststats,
+                                    "P_values" = ksshoal_iid_pvals)
+ks_shoal_iidsmry_short$signif <- apply(ks_shoal_iidsmry_short, 1, 
+                               function(x) {ifelse(x[["P_values"]] <= 0.05, "*", "ns")})
+ks_shoal_iidsmry_short
+
+```
+
+- graphing the eCDF by generation with lines as treatments
+```{r CDF graph for shoaling iid data}
+shoal_iid_cdf_plot <- ggplot(shoal_iid_long_outlierd, aes(x = InterIndivDist, 
+                                                          color = treatment)) +
+  stat_ecdf(geom = "step") +
+  theme_classic() +
+  facet_wrap("generation") +
+  labs(x = "Shoaling Inter-individual Distance", 
+       y = "Time (min)", 
+       color = "Treatment") +
+  scale_color_brewer(palette = "PuOr", 
+                     name = "Treatments", 
+                    labels = c("AhR2Mo + / BaP +",
+                                 "AhR2Mo + / BaP -",
+                                 "AhR2Mo - / BaP +",
+                                 "AhR2Mo - / BaP -"))
+shoal_iid_cdf_plot
+
+```
+
+## Shoaling: speed
+- average speed of all four fish within the shoal
+
+- test assumptions of statistical model are met: non-normal data, f(x) is non-decreasing and right-continuous
+```{r test assumptions and check distribution shoaling speed}
+# check normality assumption/what type of distribution
+# histogram (for all distances pooled across time points)
+mu_shoal_speed <- ddply(shoal_speed_long_outlierd, .(generation, treatment), summarise, 
+                     grp.mean = mean(speed, na.rm = TRUE))
+mu_shoal_speed
+
+ggplot(data = shoal_speed_long_outlierd, 
+       aes(x = speed, color = generation, fill = generation)) +
+  geom_histogram(aes(y = ..density..), position = "identity", alpha = 0.2) +
+  geom_vline(data = mu_shoal_speed, aes(xintercept = grp.mean, color = generation),
+           linetype = "dashed") +
+  geom_density(alpha = 0.1) + 
+  facet_wrap(~ treatment, ncol = 2)
+
+```
+
+- Two sample K-S test comparing experimental treatments to control group where p-value <= 0.05 means the two data sets likely came from different distributions
+```{r Kolmogorov-Smironov test shoaling speed}
+# summary list for full stats for easy reference later
+ks_shoal_speedsmry <- c()
+
+## F0 generation tests
+
+# K-S test comparing CoMo_DMSO to CoMo_BaP
+ks_shoal_speedsmry$F0_BaPeffect <- ks.test(shoal_speed_long_outlierd$speed[shoal_speed_long_outlierd$group %in% "F0_CoMo_DMSO"],
+                                   shoal_speed_long_outlierd$speed[shoal_speed_long_outlierd$group %in% "F0_CoMo_BaP"]) # from different distributions
+
+# K-S test comparing CoMo_DMSO to AhR2_DMSO
+ks_shoal_speedsmry$F0_AhR2effect <- ks.test(shoal_speed_long_outlierd$speed[shoal_speed_long_outlierd$group %in% "F0_CoMo_DMSO"],
+                                   shoal_speed_long_outlierd$speed[shoal_speed_long_outlierd$group %in% "F0_AHRMo_DMSO"]) # not from different distributions
+
+# K-S test comparing CoMo_DMSO to AhR2_BaP
+ks_shoal_speedsmry$F0_intereffect <- ks.test(shoal_speed_long_outlierd$speed[shoal_speed_long_outlierd$group %in% "F0_CoMo_DMSO"],
+                                   shoal_speed_long_outlierd$speed[shoal_speed_long_outlierd$group %in% "F0_AHRMo_BaP"]) # from different distributions
+
+
+## F1 generation tests
+
+# K-S test comparing CoMo_DMSO to CoMo_BaP
+ks_shoal_speedsmry$F1_BaPeffect <- ks.test(shoal_speed_long_outlierd$speed[shoal_speed_long_outlierd$group %in% "F1_CoMo_DMSO"],
+                                   shoal_speed_long_outlierd$speed[shoal_speed_long_outlierd$group %in% "F1_CoMo_BaP"]) # from different distributions
+
+# K-S test comparing CoMo_DMSO to AhR2_DMSO
+ks_shoal_speedsmry$F1_AhR2effect <- ks.test(shoal_speed_long_outlierd$speed[shoal_speed_long_outlierd$group %in% "F1_CoMo_DMSO"],
+                                   shoal_speed_long_outlierd$speed[shoal_speed_long_outlierd$group %in% "F1_AHRMo_DMSO"]) # from different distributions
+
+# K-S test comparing CoMo_DMSO to AhR2_BaP
+ks_shoal_speedsmry$F1_intereffect <- ks.test(shoal_speed_long_outlierd$speed[shoal_speed_long_outlierd$group %in% "F1_CoMo_DMSO"],
+                                   shoal_speed_long_outlierd$speed[shoal_speed_long_outlierd$group %in% "F1_AHRMo_BaP"]) # not from different distributions
+
+
+## F2 generation tests
+
+# K-S test comparing CoMo_DMSO to CoMo_BaP
+ks_shoal_speedsmry$F2_BaPeffect <- ks.test(shoal_speed_long_outlierd$speed[shoal_speed_long_outlierd$group %in% "F2_CoMo_DMSO"],
+                                   shoal_speed_long_outlierd$speed[shoal_speed_long_outlierd$group %in% "F2_CoMo_BaP"]) # not from different distributions
+
+# K-S test comparing CoMo_DMSO to AhR2_DMSO
+ks_shoal_speedsmry$F2_AhR2effect <- ks.test(shoal_speed_long_outlierd$speed[shoal_speed_long_outlierd$group %in% "F2_CoMo_DMSO"],
+                                   shoal_speed_long_outlierd$speed[shoal_speed_long_outlierd$group %in% "F2_AHRMo_DMSO"]) # from different distributions
+
+# K-S test comparing CoMo_DMSO to AhR2_BaP
+ks_shoal_speedsmry$F2_intereffect <- ks.test(shoal_speed_long_outlierd$speed[shoal_speed_long_outlierd$group %in% "F2_CoMo_DMSO"],
+                                   shoal_speed_long_outlierd$speed[shoal_speed_long_outlierd$group %in% "F2_AHRMo_BaP"]) # from different distributions
+
+```
+
+```{r make stat results summary table shoaling speed}
+## make summary data frame of just the useful stats for publishing
+# list of test stats
+ksshoal_speed_teststats <- c(ks_shoal_speedsmry$F0_BaPeffect$statistic, 
+                          ks_shoal_speedsmry$F0_AhR2effect$statistic,
+                          ks_shoal_speedsmry$F0_intereffect$statistic,
+                          ks_shoal_speedsmry$F1_BaPeffect$statistic, 
+                          ks_shoal_speedsmry$F1_AhR2effect$statistic,
+                          ks_shoal_speedsmry$F1_intereffect$statistic, 
+                          ks_shoal_speedsmry$F2_BaPeffect$statistic, 
+                          ks_shoal_speedsmry$F2_AhR2effect$statistic,
+                          ks_shoal_speedsmry$F2_intereffect$statistic)
+# list of p-values
+ksshoal_speed_pvals <- c(ks_shoal_speedsmry$F0_BaPeffect$p.value, 
+                          ks_shoal_speedsmry$F0_AhR2effect$p.value,
+                          ks_shoal_speedsmry$F0_intereffect$p.value,
+                          ks_shoal_speedsmry$F1_BaPeffect$p.value, 
+                          ks_shoal_speedsmry$F1_AhR2effect$p.value,
+                          ks_shoal_speedsmry$F1_intereffect$p.value, 
+                          ks_shoal_speedsmry$F2_BaPeffect$p.value, 
+                          ks_shoal_speedsmry$F2_AhR2effect$p.value,
+                          ks_shoal_speedsmry$F2_intereffect$p.value)
+
+# data frame of all summary stats of KS test for quick, easy reference and publishing
+ks_shoal_speedsmry_short <- data.frame("Generation" = c(rep("F0", 3), rep("F1", 3), rep("F2", 3)),
+                                    "Experimental_treatment_group" = c(rep(c("AhR2Mo - / BaP +", "AhR2Mo + / BaP -", "AhR2Mo + / BaP +"), 3)), 
+                                    "Test_statistic" = ksshoal_speed_teststats,
+                                    "P_values" = ksshoal_speed_pvals)
+ks_shoal_speedsmry_short$signif <- apply(ks_shoal_speedsmry_short, 1, 
+                               function(x) {ifelse(x[["P_values"]] <= 0.05, "*", "ns")})
+ks_shoal_speedsmry_short
+## NOTE: for some reason the above signif column code not working just on this behavior measure??
+
+```
+
+- graphing the eCDF by generation with lines as treatments
+```{r CDF graph for shoaling speed data}
+shoal_speed_cdf_plot <- ggplot(shoal_speed_long_outlierd, aes(x = speed, color = treatment)) +
+  stat_ecdf(geom = "step") +
+  theme_classic() +
+  facet_wrap("generation") +
+  labs(x = "Shoaling Speed", y = "Time (min)", color = "Treatment") +
+  scale_color_brewer(palette = "PuOr", 
+                     name = "Treatments", 
+                    labels = c("AhR2Mo + / BaP +",
+                                 "AhR2Mo + / BaP -",
+                                 "AhR2Mo - / BaP +",
+                                 "AhR2Mo - / BaP -"))
+shoal_speed_cdf_plot
+
+```
+
+
+## summary graph of all behavior measures
+```{r all behavior measures graph per generation}
+behavior_cdfplots <- ggarrange(freeswim_cdf_plot, shoal_nnd_cdf_plot, 
+                               shoal_iid_cdf_plot, shoal_speed_cdf_plot,
+                               common.legend = TRUE,
+                               legend = "bottom",
+                               ncol = 1, nrow = 4)
+behavior_cdfplots
+
+# ggsave(paste0(output_dir, "behavior_cdfplots.tiff"),
+#        width = 7,
+#        height = 8,
+#        dpi = 300)
+
+```
+
+
+## Calculate and graph AUC for each metric
+
+# Freeswim
+```{r graph raw Freeswim data with best fit line}
+ggplot(data = freeswim_long_outlierd, 
+       aes(x = timepoint, y = Distance, group = treatment)) +
+  geom_point(aes(color = treatment)) +
+  geom_smooth(formula = y ~ x, method = "loess", se = TRUE,
+              linetype = "solid", aes(color = treatment)) +
+  facet_wrap(~ generation, ncol = 1)
+
+```
+
+```{r calculate Freeswim AUC per fish and add to data frames}
+library(DescTools)
+
+freeswim_cdf <- lapply(split(freeswim_long_outlierd$Distance, 
+                       freeswim_long_outlierd$FishNumber), ecdf)
+freeswim_cdf_y <- sapply(freeswim_cdf, 
+                         function(e) e(freeswim_long_outlierd$Distance))
+
+freeswim_long_AUC <- as.data.frame(freeswim_cdf_y) %>%
+  mutate(x = 1:nrow(as.data.frame(freeswim_cdf_y))) %>%
+  gather(key = "FishNumber", value = "CDF_y", 1:123) %>%
+  mutate(FishNumber = as.numeric(FishNumber)) %>%
+  inner_join(freeswim_long_outlierd, by = "FishNumber", multiple = "all") %>%
+  group_by(group, FishNumber) %>%
+  dplyr::summarise(AUC = AUC(x, CDF_y, na.rm = TRUE)) # default method is trapezoid
+freeswim_long_AUC
+
+```
+
+```{r Freeswim linear model}
+# linear model
+freeswim_wide_outlierd <- spread(freeswim_long_outlierd, timepoint, Distance)
+freeswim_lm_AUC <- freeswim_long_AUC %>%
+  inner_join(freeswim_wide_outlierd, by = "FishNumber") %>%
+  mutate(treatment = str_replace(treatment, "CoMo _BaP", "CoMo_BaP"), 
+         treats = treatment) %>%
+  extract(treats, into = c("Morpholino", "Exposure"), "(.*)_([^_]+)$") %>%
+  mutate(Exposure = relevel(factor(Exposure), "DMSO"),
+         Morpholino = relevel(factor(Morpholino), "CoMo"),
+         Treatments = relevel(factor(treatment), "CoMo_DMSO"))
+
+# now filter and run linear models per generation
+freeswim_lm_AUCF0 <- dplyr::filter(freeswim_lm_AUC, generation == "F0")
+summary(lm(AUC ~ Exposure + Morpholino + Exposure:Morpholino, data = freeswim_lm_AUCF0))
+summary(lm(AUC ~ Treatments, data = freeswim_lm_AUCF0))
+
+freeswim_lm_AUCF1 <- dplyr::filter(freeswim_lm_AUC, generation == "F1")
+summary(lm(AUC ~ Exposure + Morpholino + Exposure:Morpholino, data = freeswim_lm_AUCF1))
+summary(lm(AUC ~ Treatments, data = freeswim_lm_AUCF1))
+
+freeswim_lm_AUCF2 <- dplyr::filter(freeswim_lm_AUC, generation == "F2")
+summary(lm(AUC ~ Exposure + Morpholino + Exposure:Morpholino, data = freeswim_lm_AUCF2))
+summary(lm(AUC ~ Treatments, data = freeswim_lm_AUCF2))
+
+# AUC doesn't vary with any of our treatment variables. boo.
+
+```
+
+```{r graph Freeswim boxplots}
+freeswim_lm_AUC$Treatments <- factor(x = freeswim_lm_AUC$Treatments,
+                             levels = c("CoMo_DMSO",
+                                        "CoMo_BaP",
+                                        "AHRMo_DMSO",
+                                        "AHRMo_BaP"))
+
+freeswimAUC_plot <- ggplot(data = freeswim_lm_AUC,
+       aes(x = Treatments, y = AUC)) +
+  geom_boxplot(aes(fill = Treatments), outlier.shape = NA) +
+  theme_classic() +
+  labs(title="Free swim Distance", 
+       x = "", y = "AUC (cm)", fill = "Treatment") +
+  theme(text = element_text(size = 20),
+        axis.text.x = element_blank(),
+        axis.ticks.x = element_blank(),
+        legend.position = "bottom") +
+  scale_fill_brewer(palette = "PuOr", direction = -1,
+                     labels = c("AHR2Mo - / BaP -",
+                               "AHR2Mo - / BaP +",
+                               "AHR2Mo + / BaP -",
+                               "AHR2Mo + / BaP +")) +
+  facet_wrap(~ generation, ncol = 3, scales = "free_y")
+freeswimAUC_plot
+
+```
+
+# Shoaling nnd
+```{r graph Shoaling nnd raw data with best fit line}
+ggplot(data = shoal_nnd_long_outlierd, 
+       aes(x = timepoint, y = NearestNeighborDist, group = treatment)) +
+  geom_point(aes(color = treatment)) +
+  geom_smooth(formula = y ~ x, method = "loess", se = TRUE,
+              linetype = "solid", aes(color = treatment)) +
+  facet_wrap(~ generation, ncol = 1)
+
+```
+
+```{r calculate Shoaling nnd AUC per fish and add to data frames}
+library(DescTools)
+
+shoal_nnd_cdf <- lapply(split(shoal_nnd_long_outlierd$NearestNeighborDist, 
+                       shoal_nnd_long_outlierd$FishNumber), ecdf)
+shoal_nnd_cdf_y <- sapply(shoal_nnd_cdf, 
+                         function(e) e(shoal_nnd_long_outlierd$NearestNeighborDist))
+
+shoal_nnd_long_AUC <- as.data.frame(shoal_nnd_cdf_y) %>%
+  mutate(x = 1:nrow(as.data.frame(shoal_nnd_cdf_y))) %>%
+  gather(key = "FishNumber", value = "CDF_y", 1:132) %>%
+  mutate(FishNumber = as.numeric(FishNumber)) %>%
+  inner_join(shoal_nnd_long_outlierd, by = "FishNumber", multiple = "all") %>%
+  group_by(group, FishNumber) %>%
+  dplyr::summarise(AUC = AUC(x, CDF_y, na.rm = TRUE)) # default method is trapezoid
+shoal_nnd_long_AUC
+
+```
+
+```{r Shoaling nnd linear model}
+# linear model
+shoal_nnd_wide_outlierd <- spread(shoal_nnd_long_outlierd, timepoint, NearestNeighborDist)
+shoal_nnd_lm_AUC <- shoal_nnd_long_AUC %>%
+  inner_join(shoal_nnd_wide_outlierd, by = "FishNumber") %>%
+  mutate(treatment = as.factor(treatment), 
+         treats = treatment) %>%
+  extract(treats, into = c("Morpholino", "Exposure"), "(.*)_([^_]+)$") %>%
+  mutate(Exposure = relevel(factor(Exposure), "DMSO"),
+         Morpholino = relevel(factor(Morpholino), "CoMo"),
+         Treatments = relevel(factor(treatment), "CoMo_DMSO"))
+
+# now filter and run linear models per generation
+shoal_nnd_lm_AUCF0 <- dplyr::filter(shoal_nnd_lm_AUC, generation == "F0")
+summary(lm(AUC ~ Exposure + Morpholino + Exposure:Morpholino, data = shoal_nnd_lm_AUCF0))
+summary(lm(AUC ~ Treatments, data = shoal_nnd_lm_AUCF0))
+
+shoal_nnd_lm_AUCF1 <- dplyr::filter(shoal_nnd_lm_AUC, generation == "F1")
+summary(lm(AUC ~ Exposure + Morpholino + Exposure:Morpholino, data = shoal_nnd_lm_AUCF1))
+summary(lm(AUC ~ Treatments, data = shoal_nnd_lm_AUCF1))
+
+shoal_nnd_lm_AUCF2 <- dplyr::filter(shoal_nnd_lm_AUC, generation == "F2")
+summary(lm(AUC ~ Exposure + Morpholino + Exposure:Morpholino, data = shoal_nnd_lm_AUCF2))
+summary(lm(AUC ~ Treatments, data = shoal_nnd_lm_AUCF2))
+
+# no significance
+
+```
+
+```{r graph Shoaling nnd boxplots}
+shoal_nnd_lm_AUC$Treatments <- factor(x = shoal_nnd_lm_AUC$Treatments,
+                             levels = c("CoMo_DMSO",
+                                        "CoMo_BaP",
+                                        "AHRMo_DMSO",
+                                        "AHRMo_BaP"))
+
+shoal_nndAUC_plot <- ggplot(data = shoal_nnd_lm_AUC,
+       aes(x = Treatments, y = AUC)) +
+  geom_boxplot(aes(fill = Treatments), outlier.shape = NA) +
+  theme_classic() +
+  labs(title="Shoaling nnd", 
+       x = "", y = "AUC (cm)", fill = "Treatment") +
+  theme(text = element_text(size = 20),
+        axis.text.x = element_blank(),
+        axis.ticks.x = element_blank(),
+        legend.position = "bottom") +
+  scale_fill_brewer(palette = "PuOr", direction = -1,
+                     labels = c("AHR2Mo - / BaP -",
+                               "AHR2Mo - / BaP +",
+                               "AHR2Mo + / BaP -",
+                               "AHR2Mo + / BaP +")) +
+  facet_wrap(~ generation, ncol = 3, scales = "free_y")
+shoal_nndAUC_plot
+
+```
+
+# Shoaling iid
+```{r graph Shoaling iid raw data with best fit line}
+ggplot(data = shoal_iid_long_outlierd, 
+       aes(x = timepoint, y = InterIndivDist, group = treatment)) +
+  geom_point(aes(color = treatment)) +
+  geom_smooth(formula = y ~ x, method = "loess", se = TRUE,
+              linetype = "solid", aes(color = treatment)) +
+  facet_wrap(~ generation, ncol = 1)
+
+```
+
+```{r calculate Shoaling iid AUC per fish and add to data frames}
+library(DescTools)
+
+shoal_iid_cdf <- lapply(split(shoal_iid_long_outlierd$InterIndivDist, 
+                       shoal_iid_long_outlierd$FishNumber), ecdf)
+shoal_iid_cdf_y <- sapply(shoal_iid_cdf, 
+                         function(e) e(shoal_iid_long_outlierd$InterIndivDist))
+
+shoal_iid_long_AUC <- as.data.frame(shoal_iid_cdf_y) %>%
+  mutate(x = 1:nrow(as.data.frame(shoal_iid_cdf_y))) %>%
+  gather(key = "FishNumber", value = "CDF_y", 1:107) %>%
+  mutate(FishNumber = as.numeric(FishNumber)) %>%
+  inner_join(shoal_iid_long_outlierd, by = "FishNumber", multiple = "all") %>%
+  group_by(group, FishNumber) %>%
+  dplyr::summarise(AUC = AUC(x, CDF_y, na.rm = TRUE)) # default method is trapezoid
+shoal_iid_long_AUC
+
+```
+
+```{r Shoaling iid linear model}
+# linear model
+shoal_iid_wide_outlierd <- spread(shoal_iid_long_outlierd, timepoint, InterIndivDist)
+shoal_iid_lm_AUC <- shoal_iid_long_AUC %>%
+  inner_join(shoal_iid_wide_outlierd, by = "FishNumber") %>%
+  mutate(treatment = str_replace(treatment, "CoMo _BaP", "CoMo_BaP"), 
+         treats = treatment) %>%
+  extract(treats, into = c("Morpholino", "Exposure"), "(.*)_([^_]+)$") %>%
+  mutate(Exposure = relevel(factor(Exposure), "DMSO"),
+         Morpholino = relevel(factor(Morpholino), "CoMo"),
+         Treatments = relevel(factor(treatment), "CoMo_DMSO"))
+
+# now filter and run linear models per generation
+shoal_iid_lm_AUCF0 <- dplyr::filter(shoal_iid_lm_AUC, generation == "F0")
+summary(lm(AUC ~ Exposure + Morpholino + Exposure:Morpholino, data = shoal_iid_lm_AUCF0))
+summary(lm(AUC ~ Treatments, data = shoal_iid_lm_AUCF0))
+
+shoal_iid_lm_AUCF1 <- dplyr::filter(shoal_iid_lm_AUC, generation == "F1")
+summary(lm(AUC ~ Exposure + Morpholino + Exposure:Morpholino, data = shoal_iid_lm_AUCF1))
+summary(lm(AUC ~ Treatments, data = shoal_iid_lm_AUCF1))
+
+shoal_iid_lm_AUCF2 <- dplyr::filter(shoal_iid_lm_AUC, generation == "F2")
+summary(lm(AUC ~ Exposure + Morpholino + Exposure:Morpholino, data = shoal_iid_lm_AUCF2))
+summary(lm(AUC ~ Treatments, data = shoal_iid_lm_AUCF2))
+
+# no significance
+
+```
+
+```{r graph Shoaling iid boxplots}
+shoal_iid_lm_AUC$Treatments <- factor(x = shoal_iid_lm_AUC$Treatments,
+                             levels = c("CoMo_DMSO",
+                                        "CoMo_BaP",
+                                        "AHRMo_DMSO",
+                                        "AHRMo_BaP"))
+
+shoal_iidAUC_plot <- ggplot(data = shoal_iid_lm_AUC,
+       aes(x = Treatments, y = AUC)) +
+  geom_boxplot(aes(fill = Treatments), outlier.shape = NA) +
+  theme_classic() +
+  labs(title="Shoaling iid", 
+       x = "", y = "AUC (cm)", fill = "Treatment") +
+  theme(text = element_text(size = 20),
+        axis.text.x = element_blank(),
+        axis.ticks.x = element_blank(),
+        legend.position = "bottom") +
+  scale_fill_brewer(palette = "PuOr", direction = -1,
+                     labels = c("AHR2Mo - / BaP -",
+                               "AHR2Mo - / BaP +",
+                               "AHR2Mo + / BaP -",
+                               "AHR2Mo + / BaP +")) +
+  facet_wrap(~ generation, ncol = 3, scales = "free_y")
+shoal_iidAUC_plot
+
+```
+
+# Shoaling speed
+```{r graph Shoaling speed raw data with best fit line}
+ggplot(data = shoal_speed_long_outlierd, 
+       aes(x = timepoint, y = speed, group = treatment)) +
+  geom_point(aes(color = treatment)) +
+  geom_smooth(formula = y ~ x, method = "loess", se = TRUE,
+              linetype = "solid", aes(color = treatment)) +
+  facet_wrap(~ generation, ncol = 1)
+
+```
+
+```{r calculate Shoaling speed AUC per fish and add to data frames}
+library(DescTools)
+
+shoal_speed_cdf <- lapply(split(shoal_speed_long_outlierd$speed, 
+                       shoal_speed_long_outlierd$FishNumber), ecdf)
+shoal_speed_cdf_y <- sapply(shoal_speed_cdf, 
+                         function(e) e(shoal_speed_long_outlierd$speed))
+
+shoal_speed_long_AUC <- as.data.frame(shoal_speed_cdf_y) %>%
+  mutate(x = 1:nrow(as.data.frame(shoal_speed_cdf_y))) %>%
+  gather(key = "FishNumber", value = "CDF_y", 1:126) %>%
+  mutate(FishNumber = as.numeric(FishNumber)) %>%
+  inner_join(shoal_speed_long_outlierd, by = "FishNumber", multiple = "all") %>%
+  group_by(group, FishNumber) %>%
+  dplyr::summarise(AUC = AUC(x, CDF_y, na.rm = TRUE)) # default method is trapezoid
+shoal_speed_long_AUC
+
+```
+
+```{r Shoaling speed linear model}
+# linear model
+shoal_speed_wide_outlierd <- spread(shoal_speed_long_outlierd, timepoint, speed)
+shoal_speed_lm_AUC <- shoal_speed_long_AUC %>%
+  inner_join(shoal_speed_wide_outlierd, by = "FishNumber") %>%
+  mutate(treatment = as.factor(treatment), 
+         treats = treatment) %>%
+  extract(treats, into = c("Morpholino", "Exposure"), "(.*)_([^_]+)$") %>%
+  mutate(Exposure = relevel(factor(Exposure), "DMSO"),
+         Morpholino = relevel(factor(Morpholino), "CoMo"),
+         Treatments = relevel(factor(treatment), "CoMo_DMSO"))
+
+# now filter and run linear models per generation
+shoal_speed_lm_AUCF0 <- dplyr::filter(shoal_speed_lm_AUC, generation == "F0")
+summary(lm(AUC ~ Exposure + Morpholino + Exposure:Morpholino, data = shoal_speed_lm_AUCF0))
+summary(lm(AUC ~ Treatments, data = shoal_speed_lm_AUCF0))
+
+shoal_speed_lm_AUCF1 <- dplyr::filter(shoal_speed_lm_AUC, generation == "F1")
+summary(lm(AUC ~ Exposure + Morpholino + Exposure:Morpholino, data = shoal_speed_lm_AUCF1))
+summary(lm(AUC ~ Treatments, data = shoal_speed_lm_AUCF1))
+
+shoal_speed_lm_AUCF2 <- dplyr::filter(shoal_speed_lm_AUC, generation == "F2")
+summary(lm(AUC ~ Exposure + Morpholino + Exposure:Morpholino, data = shoal_speed_lm_AUCF2))
+summary(lm(AUC ~ Treatments, data = shoal_speed_lm_AUCF2))
+
+# some significant patterns here
+
+```
+
+```{r graph Shoaling speed boxplots}
+shoal_speed_lm_AUC$Treatments <- factor(x = shoal_speed_lm_AUC$Treatments,
+                             levels = c("CoMo_DMSO",
+                                        "CoMo_BaP",
+                                        "AHRMo_DMSO",
+                                        "AHRMo_BaP"))
+
+shoal_speedAUC_plot <- ggplot(data = shoal_speed_lm_AUC,
+       aes(x = Treatments, y = AUC)) +
+  geom_boxplot(aes(fill = Treatments), outlier.shape = NA) +
+  theme_classic() +
+  labs(title="Shoaling speed", 
+       x = "", y = "AUC (cm/min)", fill = "Treatment") +
+  theme(text = element_text(size = 20),
+        axis.text.x = element_blank(),
+        axis.ticks.x = element_blank(),
+        legend.position = "bottom") +
+  scale_fill_brewer(palette = "PuOr", direction = -1,
+                     labels = c("AHR2Mo - / BaP -",
+                               "AHR2Mo - / BaP +",
+                               "AHR2Mo + / BaP -",
+                               "AHR2Mo + / BaP +")) +
+  facet_wrap(~ generation, ncol = 3, scales = "free_y")
+shoal_speedAUC_plot
+
+```
+
+# combine graphs into multi-panel
+```{r could use this graph to show the KS test patterns}
+# combine into panels
+AUC_plot <- ggarrange(freeswimAUC_plot, shoal_nndAUC_plot, 
+                      shoal_iidAUC_plot, shoal_speedAUC_plot, 
+                      ncol = 1, nrow = 4,
+                      align = "v", 
+                      common.legend = TRUE, legend = "right")
+AUC_plot
+
+
+```
+
+

@@ -1,0 +1,12 @@
+ggplot2
+ggpubr
+dplyr
+tidyr
+tibble
+gridExtra
+knitr
+stringr
+permute
+lattice
+vegan
+MASS

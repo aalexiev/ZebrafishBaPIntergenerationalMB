@@ -1,0 +1,534 @@
+---
+title: "16S diversity analysis"
+author: "Alexandra Alexiev"
+date: "2023-11-14"
+output: md_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+# knit options for whole doc. I will add in specific chunks when I don't want this to be the case
+knitr::opts_chunk$set(echo = TRUE, # show code
+                      eval = TRUE, # do not run chunks when knitting
+                      include = TRUE, # include chunk input in final doc
+                      warning = FALSE, # do not show warnings in final doc
+                      message = FALSE, # do not show messages from code in final doc
+                      collapse = TRUE, # when possible, do put multiple outputs in one block
+                      dpi = 300, # fig resolution
+                      fig.dim = c(9, 5), # the default figure dimensions
+                      out.width = "98%", # the default figure output width
+                      out.height = "98%", # the default figure output height 
+                      cache = TRUE) # dont rerun chunks that haven't been changed
+
+```
+
+## Housekeeping
+
+```{r libraries and paths}
+# libraries
+library(ggpubr)
+library(dplyr)
+library(tidyr)
+library(tibble)
+library(ggplot2)
+library(gridExtra)
+library(knitr)
+library(stringr)
+library(vegan)
+library(MASS)
+# set seed so stats like permanova are reproducible
+set.seed(3)
+
+# to knit an Rmd file, you need explicit file paths typed out, so I created these objects as shortcuts so I could call the object for commonly used file paths instead of retyping the whole thing each time
+home_dir <- "/Users/alexieva/Documents/Projects/Writing/Research manuscripts/metagen_zfBaP"
+input_dir <- "/Users/alexieva/Documents/Projects/Writing/Research manuscripts/metagen_zfBaP/Pub_analysis_gitlab/input_files_pub/"
+output_dir <- "/Users/alexieva/Documents/Projects/Analysis/metagen_zfBaP/16S_Ebony/"
+
+```
+
+## load in 16S data from Ebony
+- this data has been pre-processed via the DADA2 pipeline and Ebony quality filtered out singletons, mitochondria, and chloroplasts
+
+```{r read in files whole dataset}
+## whole dataset (all generations) files
+
+# read in 16S data object for whole dataset
+# convert to data frame from phyloseq object Ebony gave me
+taxa_psobj <- readRDS(paste0(input_dir, "ps.qc.rds"))
+taxa_otutab <- as.data.frame(as.matrix(taxa_psobj@otu_table))
+# metadata for whole dataset
+metaALL <- as.data.frame(as.matrix(taxa_psobj@sam_data)) %>%
+  mutate(Exposure = relevel(factor(Exposure), "DMSO"), 
+         Morph = relevel(factor(Morph), "CoMo"),
+         Treatments = relevel(factor(Treatments), "CoMo+DMSO"),
+         Generation = factor(Generation),
+         Sex = factor(Sex)) %>% # relevel and factor so these are accurate
+  rename_at("Morph", ~"Morpholino")
+metaALL$Treatments <- gsub("\\+", "_", metaALL$Treatments)
+
+```
+
+```{r read in different generations}
+## F0
+F0_meta <- dplyr::filter(metaALL, Generation == "F0")
+F0_taxa_psobj <- readRDS(paste0(home_dir, "ps.qc.f0.rds"))
+F0_taxa_otutab <- as.data.frame(as.matrix(F0_taxa_psobj@otu_table))
+metaF0 <- as.data.frame(as.matrix(F0_taxa_psobj@sam_data)) %>%
+  mutate(Exposure = relevel(factor(Exposure), "DMSO"), 
+         Morph = relevel(factor(Morph), "CoMo"),
+         Treatments = relevel(factor(Treatments), "CoMo+DMSO"),
+         Generation = factor(Generation),
+         Sex = factor(Sex)) %>% # relevel and factor so these are accurate
+  rename_at("Morph", ~"Morpholino")
+metaF0$Treatments <- gsub("\\+", "_", metaF0$Treatments)
+
+## F1
+F1_meta <- dplyr::filter(metaALL, Generation == "F1")
+F1_taxa_psobj <- readRDS(paste0(home_dir, "ps.qc.f1.rds"))
+F1_taxa_otutab <- as.data.frame(as.matrix(F1_taxa_psobj@otu_table))
+metaF1 <- as.data.frame(as.matrix(F1_taxa_psobj@sam_data)) %>%
+  mutate(Exposure = relevel(factor(Exposure), "DMSO"), 
+         Morph = relevel(factor(Morph), "CoMo"),
+         Treatments = relevel(factor(Treatments), "CoMo+DMSO"),
+         Generation = factor(Generation),
+         Sex = factor(Sex)) %>% # relevel and factor so these are accurate
+  rename_at("Morph", ~"Morpholino")
+metaF1$Treatments <- gsub("\\+", "_", metaF1$Treatments)
+
+## F2
+F2_meta <- dplyr::filter(metaALL, Generation == "F2")
+F2_taxa_psobj <- readRDS(paste0(home_dir, "ps.qc.f2.rds"))
+F2_taxa_otutab <- as.data.frame(as.matrix(F2_taxa_psobj@otu_table))
+metaF2 <- as.data.frame(as.matrix(F2_taxa_psobj@sam_data)) %>%
+  mutate(Exposure = relevel(factor(Exposure), "DMSO"), 
+         Morph = relevel(factor(Morph), "CoMo"),
+         Treatments = relevel(factor(Treatments), "CoMo+DMSO"),
+         Generation = factor(Generation),
+         Sex = factor(Sex)) %>% # relevel and factor so these are accurate
+  rename_at("Morph", ~"Morpholino")
+metaF2$Treatments <- gsub("\\+", "_", metaF2$Treatments)
+
+```
+
+## Alpha diversity
+
+# Whole dataset
+
+Can gut microbiome taxonomic alpha diverity be predicted by covariates, in particular generation, exposure, and morpholino treatment?
+
+```{r calc alpha diversity metrics}
+tax_richness <- specnumber(taxa_otutab)
+tax_shannon <- diversity(taxa_otutab, "shannon", base = exp(1))
+tax_simpson <- diversity(taxa_otutab, "simpson")
+alphadiv <- data.frame(tax_richness, tax_shannon, tax_simpson) %>%
+  rownames_to_column("SampleID") %>%
+  inner_join(metaALL, by = "SampleID") %>%
+  dplyr::select(c("SampleID", "tax_richness", "tax_shannon", "tax_simpson", "Exposure", "Morpholino", "Generation", "Sex", "Treatments")) # filter to only important variables we are testing
+alphadiv
+
+```
+
+```{r linear model richness with covariates}
+# step AIC to test which model
+testmod_rich <- lm(tax_richness ~ Generation + Exposure + Morpholino + Sex + Generation:Exposure + Generation:Morpholino + Exposure:Morpholino + Sex:Generation + Sex:Exposure + Sex:Morpholino, data = alphadiv)
+AIC_wholedata <- stepAIC(testmod_rich)
+summary(AIC_wholedata)
+
+```
+
+```{r linear model shannon with covariates}
+# step AIC to test which model
+testmod_shan <- lm(tax_shannon ~ Generation + Exposure + Morpholino + Sex + Generation:Exposure + Generation:Morpholino + Exposure:Morpholino + Sex:Generation + Sex:Exposure + Sex:Morpholino, data = alphadiv)
+AIC_wholedata <- stepAIC(testmod_shan)
+summary(AIC_wholedata)
+
+```
+
+```{r manuscript figure with whole dataset alpha diversity across generations}
+alphadiv$Treatments <- factor(alphadiv$Treatments, 
+                                levels = c("CoMo_DMSO",
+                                           "CoMo_BaP", 
+                                           "AHR2Mo_DMSO",
+                                           "AHR2Mo_BaP"))
+alphadiv <- alphadiv[alphadiv$tax_richness < 200,] # remove extreme point
+tax_richplotint <- ggplot(alphadiv, aes(x = Treatments, y = tax_richness,
+                                    fill = Generation)) + 
+  geom_boxplot() +
+  theme_classic() +
+  labs(x = NULL, y = "ASV Richness") +
+  scale_fill_brewer(palette = "PuBu") +
+  scale_x_discrete(labels = c("AhR2Mo - / BaP -",
+                               "AhR2Mo - / BaP +",
+                               "AhR2Mo + / BaP -",
+                               "AhR2Mo + / BaP +")) +
+  theme(text = element_text(size = 25))
+
+tax_richplotint
+
+
+```
+
+
+
+# F0
+
+Can F0 gut microbiome taxonomic alpha diveristy be predicted by exposure, morpholino, and other covariates?
+
+```{r calc alpha diversity metrics F0}
+tax_richness <- specnumber(F0_taxa_otutab)
+tax_shannon <- diversity(F0_taxa_otutab, "shannon", base = exp(1))
+tax_simpson <- diversity(F0_taxa_otutab, "simpson")
+F0alphadiv <- data.frame(tax_richness, tax_shannon, tax_simpson) %>%
+  rownames_to_column("SampleID") %>%
+  inner_join(metaALL, by = "SampleID") %>%
+  dplyr::select(c("SampleID", "tax_richness", "tax_shannon", "tax_simpson", "Exposure", "Morpholino", "Generation", "Sex", "Treatments")) # filter to only important variables we are testing
+F0alphadiv
+
+```
+
+```{r linear model richness with covariates F0}
+# step AIC to test which model
+testmod_richF0 <- lm(tax_richness ~ Exposure + Morpholino + Sex + Exposure:Morpholino + Sex:Exposure + Sex:Morpholino, 
+                   data = F0alphadiv)
+AIC_wholedata_richF0 <- stepAIC(testmod_richF0)
+summary(AIC_wholedata_richF0)
+
+```
+
+```{r linear model shannon with covariates F0}
+# step AIC to test which model
+testmod_shanF0 <- lm(tax_shannon ~ Exposure + Morpholino + Sex + Exposure:Morpholino + Sex:Exposure + Sex:Morpholino, 
+                   data = F0alphadiv)
+AIC_wholedata_shanF0 <- stepAIC(testmod_shanF0)
+summary(AIC_wholedata_shanF0)
+
+```
+
+```{r make manuscript fig of F0 16S richness}
+pal_shan <- c("#5F3C98", "#E76100") # pallete for morpholino
+
+taxF0_richplot <- ggplot(F0alphadiv) +
+  geom_boxplot(aes(x = factor(Exposure), y = tax_richness, fill = Morpholino),
+               position = position_dodge(0.7), width = 0.5, alpha = 0.5,
+               outlier.shape = NA) +
+  geom_point(aes(x = factor(Exposure), y = tax_richness, color = Morpholino),
+             position = position_jitterdodge(jitter.width = 0.5, dodge.width = 0.7, seed = 3)) +
+  stat_smooth(aes(x = as.integer(Exposure), y = tax_richness, color = Morpholino, fill = Morpholino),
+              method = lm, se = T,
+              position = position_dodge(0.7)) +
+  stat_regline_equation(aes(x = as.integer(Exposure), y = tax_richness, color = Morpholino),
+                        label.x.npc = "left") +
+  labs(x = "", y = "Taxonomic Richness") +
+  theme_classic() +
+  scale_fill_manual(values = pal_shan) +
+  scale_color_manual(values = pal_shan, 
+                     labels = c("Control morpholino",
+                                "AhR2 morpholino")) +
+  theme(text = element_text(size = 20),
+        legend.title = element_blank()) +
+  guides(fill = "none") +
+  ylim(0, range(F0alphadiv$tax_richness)[2]+10) +
+  facet_wrap("Sex")
+
+taxF0_richplot
+
+
+```
+
+
+# F1
+
+Can F1 gut microbiome taxonomic alpha diveristy be predicted by exposure, morpholino, and other covariates?
+
+```{r calc alpha diversity metrics F1}
+tax_richness <- specnumber(F1_taxa_otutab)
+tax_shannon <- diversity(F1_taxa_otutab, "shannon", base = exp(1))
+tax_simpson <- diversity(F1_taxa_otutab, "simpson")
+F1alphadiv <- data.frame(tax_richness, tax_shannon, tax_simpson) %>%
+  rownames_to_column("SampleID") %>%
+  inner_join(metaALL, by = "SampleID") %>%
+  dplyr::select(c("SampleID", "tax_richness", "tax_shannon", "tax_simpson", "Exposure", "Morpholino", "Generation", "Sex", "Treatments")) # filter to only important variables we are testing
+F1alphadiv
+
+```
+
+```{r linear model richness with covariates F1}
+# step AIC to test which model
+testmod_richF1 <- lm(tax_richness ~ Exposure + Morpholino + Sex + Exposure:Morpholino + Sex:Exposure + Sex:Morpholino, 
+                   data = F1alphadiv)
+AIC_wholedata_richF1 <- stepAIC(testmod_richF1)
+summary(AIC_wholedata_richF1)
+
+```
+
+```{r linear model shannon with covariates F1}
+# step AIC to test which model
+testmod_shanF1 <- lm(tax_shannon ~ Exposure + Morpholino + Sex + Exposure:Morpholino + Sex:Exposure + Sex:Morpholino, 
+                   data = F1alphadiv)
+AIC_wholedata_shanF1 <- stepAIC(testmod_shanF1)
+summary(AIC_wholedata_shanF1)
+
+```
+
+
+# F2
+
+Can F2 gut microbiome taxonomic alpha diveristy be predicted by exposure, morpholino, and other covariates?
+
+```{r calc alpha diversity metrics F2}
+tax_richness <- specnumber(F2_taxa_otutab)
+tax_shannon <- diversity(F2_taxa_otutab, "shannon", base = exp(1))
+tax_simpson <- diversity(F2_taxa_otutab, "simpson")
+F2alphadiv <- data.frame(tax_richness, tax_shannon, tax_simpson) %>%
+  rownames_to_column("SampleID") %>%
+  inner_join(metaALL, by = "SampleID") %>%
+  dplyr::select(c("SampleID", "tax_richness", "tax_shannon", "tax_simpson", "Exposure", "Morpholino", "Generation", "Sex", "Treatments")) # filter to only important variables we are testing
+F2alphadiv
+
+```
+
+```{r linear model richness with covariates F2}
+# step AIC to test which model
+testmod_richF2 <- lm(tax_richness ~ Exposure + Morpholino + Sex + Exposure:Morpholino + Sex:Exposure + Sex:Morpholino, 
+                   data = F2alphadiv)
+AIC_wholedata_richF2 <- stepAIC(testmod_richF2)
+summary(AIC_wholedata_richF2)
+
+```
+
+```{r linear model shannon with covariates F2}
+# step AIC to test which model
+testmod_shanF2 <- lm(tax_shannon ~ Exposure + Morpholino + Sex + Exposure:Morpholino + Sex:Exposure + Sex:Morpholino, 
+                   data = F2alphadiv)
+AIC_wholedata_shanF2 <- stepAIC(testmod_shanF2)
+summary(AIC_wholedata_shanF2)
+
+```
+
+
+
+## Beta diversity and dispersion
+
+# Whole dataset
+```{r ordistep model selection for dbRDA, eval=F}
+## check model with all possible options (have checked sex with ordistep in the past and doesn't come out important to model)
+meta_modALL <- metaALL %>%
+  dplyr::select(c("Exposure", "Morpholino", "Generation", "Sex"))
+ALLmod0 <- capscale(taxa_otutab ~ 1, meta_modALL, distance = "bray")  # Model with intercept only
+ALLmod1 <- capscale(taxa_otutab ~ . + Exposure:Morpholino + Morpholino:Exposure + Generation:Exposure + Generation:Morpholino + Sex: Generation + Sex:Exposure + Sex:Morpholino, meta_modALL, distance = "bray")  # Model with all explanatory variables
+tax_ordiALL <- ordistep(ALLmod0, scope = formula(ALLmod1)) # this determines what the best model is to run RDA on
+tax_ordiALL
+
+```
+
+```{r PERMANOVA with optimal model}
+tax_dm <- vegdist(taxa_otutab, method = "bray")
+PermExpandMod_tax <- adonis2(tax_dm ~ Generation + Exposure + Sex + Generation:Exposure, 
+                             data = metaALL)
+PermExpandMod_tax
+
+```
+
+```{r beta dispersion calculation and lm stats}
+# calc dispersion
+metaALL$group <- as.factor(paste0(metaALL$Treatments, "_", metaALL$Generation))
+tax.disper <- betadisper(tax_dm, metaALL$group)
+
+# make file for graphing
+tax.Disper1 <- data.frame(tax.disper$distances)
+colnames(tax.Disper1) <- "dispers"
+tax.Disper2 <- tax.Disper1 %>%
+  rownames_to_column("SampleID") %>%
+  inner_join(y = metaALL, 
+             by = "SampleID")
+
+## NOT WORKING BECAUSE variable lengths differ (found for 'Generation')??
+## linear model
+# step AIC to test model
+testmod_bdisp <- lm(tax.disper$distances ~ Generation + Exposure + Morpholino + Sex + Generation:Exposure + Exposure:Morpholino + Generation:Morpholino,
+                    data = tax.Disper2)
+AIC_bdispALL <- stepAIC(testmod_bdisp)
+# save in object
+lm_betadisper <- summary(AIC_bdispALL)
+lm_betadisper
+
+```
+
+
+# F0
+```{r F0 ordistep model selection for dbRDA, eval=F}
+## check model with all possible options (have checked sex with ordistep in the past and doesn't come out important to model)
+meta_modF0 <- metaF0 %>%
+  dplyr::select(c("Exposure", "Morpholino", "Sex"))
+F0mod0 <- capscale(F0_taxa_otutab ~ 1, meta_modF0, distance = "bray")  # Model with intercept only
+F0mod1 <- capscale(F0_taxa_otutab ~ . + Exposure:Morpholino + Morpholino:Exposure + Sex:Exposure + Sex:Morpholino, meta_modF0, distance = "bray")  # Model with all explanatory variables
+tax_ordiF0 <- ordistep(F0mod0, scope = formula(F0mod1)) # this determines what the best model is to run RDA on
+tax_ordiF0
+
+```
+
+```{r F0 PERMANOVA with optimal model}
+F0tax_dm <- vegdist(F0_taxa_otutab, method = "bray")
+PermExpandMod_taxF0 <- adonis2(F0tax_dm ~ Morpholino + Sex, 
+                             data = metaF0)
+PermExpandMod_taxF0
+
+```
+
+```{r F0 beta dispersion calculation and lm stats}
+# calc dispersion
+F0tax.disper <- betadisper(F0tax_dm, metaF0$Treatments)
+
+# make file for graphing
+F0tax.Disper1 <- data.frame(F0tax.disper$distances)
+colnames(F0tax.Disper1) <- "dispers"
+F0tax.Disper2 <- F0tax.Disper1 %>%
+  rownames_to_column("SampleID") %>%
+  inner_join(y = metaF0, 
+             by = "SampleID")
+
+## linear model
+# step AIC to test model
+testmod_bdispF0 <- lm(F0tax.disper$distances ~ Exposure + Morpholino + Sex + Exposure:Morpholino + Sex:Exposure + Sex:Morpholino, 
+                    data = F0tax.Disper2)
+AIC_bdispF0 <- stepAIC(testmod_bdispF0)
+# save in object
+lm_betadisperF0 <- summary(AIC_bdispF0)
+lm_betadisperF0
+
+```
+
+```{r figure of F0 beta diversity bray-curtis rda}
+# pre plot data frame
+smry_rdaF0 <- summary(capscale(formula = F0_taxa_otutab ~ Morpholino + Sex, 
+                               data = metaF0,
+                               distance = "bray"))
+F0_PC1  <- data.frame(smry_rdaF0$sites[,1:2]) %>%      # these are the x, y coordinates for the sample points (e.g. BaP_####)
+  rownames_to_column("SampleID") %>%
+  inner_join(dplyr::select(metaF0, c(SampleID, Treatments, Exposure, Morpholino, Sex)), by = "SampleID") %>%
+  column_to_rownames("SampleID")
+F0_PC2  <- data.frame(smry_rdaF0$biplot)     # x and y coordinates for the vectors
+# reorder x-axis
+F0_PC1$Treatments <- factor(F0_PC1$Treatments, 
+                        levels = c("CoMo_DMSO",
+                                   "CoMo_BaP", 
+                                   "AHR2Mo_DMSO",
+                                   "AHR2Mo_BaP"))
+
+rda_plotF0 <- ggplot(F0_PC1, aes(x = CAP1, y = CAP2)) + 
+  geom_point(aes(color = Treatments, shape = Sex), size = 2) +
+  theme_classic() +
+  geom_hline(yintercept = 0, linetype = "dotted") +
+  geom_vline(xintercept = 0, linetype = "dotted") +
+  geom_segment(data = F0_PC2, aes(x = 0, xend = CAP1, y = 0, yend = CAP2), 
+               color = "black", arrow = arrow(length = unit(0.01, "npc"))) +
+  geom_text(data = F0_PC2, 
+            aes(x = CAP1, y = CAP2, label = c("AHR2 Morpholino", "Sex (Male)")), 
+            color = "black", size = 4, hjust = c(0.55, 0.5), vjust = c(-0.5, -0.45)) +
+  labs(x = paste0("CAP1 (",round(100*smry_rdaF0$cont$importance[2, "CAP1"], digits = 2),"%)"),
+       y = paste0("CAP2 (",round(100*smry_rdaF0$cont$importance[2, "CAP2"], digits = 2),"%)")) +  
+  scale_color_brewer(palette = "PuOr", direction = -1,
+                     name = "Treatments",
+                     labels = c("AHR2Mo - / BaP -",
+                               "AHR2Mo - / BaP +",
+                               "AHR2Mo + / BaP -",
+                               "AHR2Mo + / BaP +")) +
+  scale_shape_discrete(labels = c("Female", "Male")) +
+  theme(text = element_text(size = 20))
+
+rda_plotF0
+
+
+```
+
+
+# F1
+```{r F1 ordistep model selection for dbRDA, eval=F}
+## check model with all possible options (have checked sex with ordistep in the past and doesn't come out important to model)
+meta_modF1 <- metaF1 %>%
+  dplyr::select(c("Exposure", "Morpholino", "Sex"))
+F1mod0 <- capscale(F1_taxa_otutab ~ 1, meta_modF1, distance = "bray")  # Model with intercept only
+F1mod1 <- capscale(F1_taxa_otutab ~ . + Exposure:Morpholino + Morpholino:Exposure + Sex:Exposure + Sex:Morpholino, meta_modF1, distance = "bray")  # Model with all explanatory variables
+tax_ordiF1 <- ordistep(F1mod0, scope = formula(F1mod1)) # this determines what the best model is to run RDA on
+tax_ordiF1
+
+```
+
+```{r F1 PERMANOVA with optimal model}
+F1tax_dm <- vegdist(F1_taxa_otutab, method = "bray")
+PermExpandMod_taxF1 <- adonis2(F1tax_dm ~ Exposure + Sex, 
+                             data = metaF1)
+PermExpandMod_taxF1
+
+```
+
+```{r F1 beta dispersion calculation and lm stats}
+# calc dispersion
+F1tax.disper <- betadisper(F1tax_dm, metaF1$Treatments)
+
+# make file for graphing
+F1tax.Disper1 <- data.frame(F1tax.disper$distances)
+colnames(F1tax.Disper1) <- "dispers"
+F1tax.Disper2 <- F1tax.Disper1 %>%
+  rownames_to_column("SampleID") %>%
+  inner_join(y = metaF1, 
+             by = "SampleID")
+
+## linear model
+# step AIC to test model
+testmod_bdispF1 <- lm(F1tax.disper$distances ~ Exposure + Morpholino + Sex + Exposure:Morpholino + Sex:Exposure + Sex:Morpholino, 
+                    data = F1tax.Disper2)
+AIC_bdispF1 <- stepAIC(testmod_bdispF1)
+# save in object
+lm_betadisperF1 <- summary(AIC_bdispF1)
+lm_betadisperF1
+
+```
+
+# F2
+```{r F2 ordistep model selection for dbRDA, eval=F}
+## check model with all possible options (have checked sex with ordistep in the past and doesn't come out important to model)
+meta_modF2 <- metaF2 %>%
+  dplyr::select(c("Exposure", "Morpholino", "Sex"))
+F2mod0 <- capscale(F2_taxa_otutab ~ 1, meta_modF2, distance = "bray")  # Model with intercept only
+F2mod1 <- capscale(F2_taxa_otutab ~ . + Exposure:Morpholino + Morpholino:Exposure + Sex:Exposure + Sex:Morpholino, meta_modF2, distance = "bray")  # Model with all explanatory variables
+tax_ordiF2 <- ordistep(F2mod0, scope = formula(F2mod1)) # this determines what the best model is to run RDA on
+tax_ordiF2
+
+```
+
+```{r F2 PERMANOVA with optimal model}
+F2tax_dm <- vegdist(F2_taxa_otutab, method = "bray")
+PermExpandMod_taxF2 <- adonis2(F2tax_dm ~ Morpholino + Exposure + Morpholino:Exposure, 
+                             data = metaF2)
+PermExpandMod_taxF2
+
+```
+
+```{r F2 beta dispersion calculation and lm stats}
+# calc dispersion
+F2tax.disper <- betadisper(F2tax_dm, metaF2$Treatments)
+
+# make file for graphing
+F2tax.Disper1 <- data.frame(F2tax.disper$distances)
+colnames(F2tax.Disper1) <- "dispers"
+F2tax.Disper2 <- F2tax.Disper1 %>%
+  rownames_to_column("SampleID") %>%
+  inner_join(y = metaF2, 
+             by = "SampleID")
+
+## linear model
+# step AIC to test model
+testmod_bdispF2 <- lm(F2tax.disper$distances ~ Exposure + Morpholino + Sex + Exposure:Morpholino + Sex:Exposure + Sex:Morpholino, 
+                    data = F2tax.Disper2)
+AIC_bdispF2 <- stepAIC(testmod_bdispF2)
+# save in object
+lm_betadisperF2 <- summary(AIC_bdispF2)
+lm_betadisperF2
+
+```
+
+
+
+

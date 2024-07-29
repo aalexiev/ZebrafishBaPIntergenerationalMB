@@ -1,0 +1,37 @@
+﻿Generation,Treatment,Metric,Statistic,Pval,Significance
+F0,CoMo _BaP,freeswim,0.2407407,0.085776, ns
+F0,CoMo _BaP,shoaling_nnd,0.2222222,0.0306982,*
+F0,CoMo _BaP,shoaling_iid,0.3333333,0.0995625, ns
+F0,CoMo _BaP,shoaling_speed,0.2925926,0.0230448,*
+F0,AHRMo_DMSO,freeswim,0.1728395,0.2593598, ns
+F0,AHRMo_DMSO,shoaling_nnd,0.2716049,0.0038011,*
+F0,AHRMo_DMSO,shoaling_iid,0.4074074,0.0206395,*
+F0,AHRMo_DMSO,shoaling_speed,0.1728395,0.2511765, ns
+F0,AHRMo_BaP,freeswim,0.2296296,0.0460685,*
+F0,AHRMo_BaP,shoaling_nnd,0.1296296,0.3612486, ns
+F0,AHRMo_BaP,shoaling_iid,0.2592593,0.1684132, ns
+F0,AHRMo_BaP,shoaling_speed,0.3838384,0.0000364,*
+F1,CoMo _BaP,freeswim,0.1759259,0.0706873, ns
+F1,CoMo _BaP,shoaling_nnd,0.1481481,0.1867397, ns
+F1,CoMo _BaP,shoaling_iid,0.1759259,0.0706873, ns
+F1,CoMo _BaP,shoaling_speed,0.212963,0.0149208,*
+F1,AHRMo_DMSO,freeswim,0.3333333,0.0005538,*
+F1,AHRMo_DMSO,shoaling_nnd,0.3240741,0.0008351,*
+F1,AHRMo_DMSO,shoaling_iid,0.3333333,0.0005538,*
+F1,AHRMo_DMSO,shoaling_speed,0.3981481,0.0000037,*
+F1,AHRMo_BaP,freeswim,0.1703704,0.0994281, ns
+F1,AHRMo_BaP,shoaling_nnd,0.1888889,0.0497375,*
+F1,AHRMo_BaP,shoaling_iid,0.1703704,0.0994281, ns
+F1,AHRMo_BaP,shoaling_speed,0.1092593,0.556501, ns
+F2,CoMo _BaP,freeswim,0.1111111,0.4694025, ns
+F2,CoMo _BaP,shoaling_nnd,0.0873016,0.7442496, ns
+F2,CoMo _BaP,shoaling_iid,0.1111111,0.4694025, ns
+F2,CoMo _BaP,shoaling_speed,0.0805861,0.825658, ns
+F2,AHRMo_DMSO,freeswim,0.1239316,0.3542932, ns
+F2,AHRMo_DMSO,shoaling_nnd,0.2307692,0.0039359,*
+F2,AHRMo_DMSO,shoaling_iid,0.1239316,0.3542932, ns
+F2,AHRMo_DMSO,shoaling_speed,0.3156288,0.0000113,*
+F2,AHRMo_BaP,freeswim,0.2336182,0.0043525,*
+F2,AHRMo_BaP,shoaling_nnd,0.1794872,0.046139,*
+F2,AHRMo_BaP,shoaling_iid,0.2336182,0.0043525,*
+F2,AHRMo_BaP,shoaling_speed,0.3247863,0.0000087,*

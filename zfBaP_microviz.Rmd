@@ -1,0 +1,939 @@
+---
+title: "microviz_check"
+author: "Alexandra Alexiev"
+date: "2023-02-01"
+output: md_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+# knit options for whole doc. I will add in specific chunks when I don't want this to be the case
+knitr::opts_chunk$set(echo = TRUE, # show code
+                      eval = FALSE, # do not run chunks when knitting
+                      include = TRUE, # include chunk input in final doc
+                      warning = FALSE, # do not show warnings in final doc
+                      message = FALSE, # do not show messages from code in final doc
+                      collapse = TRUE, # when possible, do put multiple outputs in one block
+                      dpi = 300, # fig resolution
+                      fig.dim = c(9, 5), # the default figure dimensions
+                      out.width = "98%", # the default figure output width
+                      out.height = "98%", # the default figure output height 
+                      cache = TRUE) # dont rerun chunks that haven't been changed
+
+```
+
+## install microviz
+
+```{r install microviz, eval=F}
+devtools::install_github("david-barnett/microViz")
+
+```
+
+
+## Housekeeping/start up
+Run this every session
+
+```{r libraries and set up, eval=T}
+library(microViz)
+library(MASS)
+library(rstatix)
+library(purrr)
+library(cplm)
+library(easystats)
+library(dplyr)
+library(tibble)
+library(DT)
+library(ggstatsplot)
+# library(qvalue)
+library(ggplot2)
+library(ggVennDiagram)
+library(ggpubr)
+set.seed(3)
+home_dir <- "/Users/alexieva/Documents/Projects/Writing/Research manuscripts/metagen_zfBaP/"
+input_dir <- "/Users/alexieva/Documents/Projects/Writing/Research manuscripts/metagen_zfBaP/Pub_analysis_gitlab/input_files_pub/"
+output_dir <- "/Users/alexieva/Documents/Projects/Analysis/metagen_zfBaP/02_finalAnalysis/outputTabsFigs/"
+
+
+```
+
+## Read in phyloseq objects
+
+# F0
+```{r read in F0 phyloseq objects, eval=T}
+# read in ps object file from laptop
+ps <- readRDS(paste0(input_dir, "F0_phyloseqobj.rds"))
+
+# add taxa table with pathway names
+tax_table(ps) <- ps %>%
+  taxa_names() %>%
+  data.frame("Pathway" = ., row.names = .) %>%
+  as.matrix() %>%
+  tax_table()
+
+# which taxa sums are zero?
+(ps %>% taxa_sums() == 0) %>%
+  which() %>%
+  names()
+
+# remove the zero data
+ps <- ps %>%
+  phyloseq_validate(remove_undetected = T)
+
+# set a test pathway to run glm on
+test_pathway <- "ANAEROFRUCAT.PWY..homolactic.fermentation"
+
+# calculate sample sums
+ps <- ps %>%
+  ps_mutate(total = sample_sums(ps))
+
+# show sample data in a table
+ps %>%
+  samdat_tbl()
+
+```
+
+# F1
+```{r read in F1 phyloseq objects, eval=T}
+# read in ps object file from laptop
+psF1 <- readRDS(paste0(input_dir, "F1_phyloseqobj.rds"))
+
+# add taxa table with pathway names
+tax_table(psF1) <- psF1 %>%
+  taxa_names() %>%
+  data.frame("Pathway" = ., row.names = .) %>%
+  as.matrix() %>%
+  tax_table()
+
+# which taxa sums are zero?
+(psF1 %>% taxa_sums() == 0) %>%
+  which() %>%
+  names()
+
+# remove the zero data
+psF1 <- psF1 %>%
+  phyloseq_validate(remove_undetected = T)
+
+# calculate sample sums
+psF1 <- psF1 %>%
+  ps_mutate(total = sample_sums(psF1))
+
+# show sample data in a table
+psF1 %>%
+  samdat_tbl()
+
+```
+
+# F2
+```{r read in F2 phyloseq objects, eval=T}
+# read in ps object file from laptop
+psF2 <- readRDS(paste0(input_dir, "F2_phyloseqobj.rds"))
+
+# add taxa table with pathway names
+tax_table(psF2) <- psF2 %>%
+  taxa_names() %>%
+  data.frame("Pathway" = ., row.names = .) %>%
+  as.matrix() %>%
+  tax_table()
+
+# which taxa sums are zero?
+(psF2 %>% taxa_sums() == 0) %>%
+  which() %>%
+  names()
+
+# remove the zero data
+psF2 <- psF2 %>%
+  phyloseq_validate(remove_undetected = T)
+
+# calculate sample sums
+psF2 <- psF2 %>%
+  ps_mutate(total = sample_sums(psF2))
+
+# show sample data in a table
+psF2 %>%
+  samdat_tbl()
+
+```
+
+# Whole Dataset
+```{r read in whole dataset phyloseq objects, eval=T}
+# merge all phyloseq objects from different generations
+sample_data(ps)$Generation <- "F0"
+sample_data(psF1)$Generation <- "F1"
+sample_data(psF2)$Generation <- "F2"
+psALL <- merge_phyloseq(ps, psF1, psF2)
+
+# add taxa table with pathway names
+tax_table(psALL) <- psALL %>%
+  taxa_names() %>%
+  data.frame("Pathway" = ., row.names = .) %>%
+  as.matrix() %>%
+  tax_table()
+
+# calculate sample sums
+psALL <- psALL %>%
+  ps_mutate(total = sample_sums(psALL))
+
+# show sample data in a table
+psALL %>%
+  samdat_tbl()
+
+```
+
+
+## Run test compound poisson glm
+
+# F0
+```{r test cpglm, eval=F}
+# run test glm on one pathway
+test_cpglm <- ps %>%
+  tax_model(
+    type = "cpglm", rank = "Pathway", taxa = test_pathway, # looking at just one test pathway that ancombc2 already identified should be differentially abundant
+    formula = formula(~Morpholino+Exposure+Morpholino:Exposure), # formula to test is based off beta diversity constrained ordination 
+    return_psx = TRUE, # returns psExtra object
+    link = 'log' # log link function converts categorical variables to continuous
+  )
+
+# get the model results
+test_cpglm %>%
+  tax_models_get() %>% # returns list generated by tax_model above
+  flatten() %>% # flatten nested data frames into 2 dimensional data frame
+  pluck(1) %>% # index first thing
+  parameters(exponentiate = FALSE) # compute and extract model parameters
+
+# clean up results to be readable and useful
+test_cpglm %>%
+  tax_models_get() %>%
+  flatten() %>%
+  enframe() %>% # converts named vectors or lists to one- or two-column data frames
+  group_by(name) %>% # group by pathway name
+  group_modify(~ { # this function iterates on a tibble
+    tbl_ttest <- .x %>% pluck('value', 1) %>% # for each "name", pick the "value" (stats from model output)
+    summary() %>% # summarize stat output
+    coef() %>% # extract model coefficients
+    as_tibble(rownames = 'term') # make a tibble with the term as rownames
+  }) %>%
+  rename(estimate = 'Estimate', # rename columns to be informative
+         std.error = 'Std. Error',
+         t.value = 't value',
+         p.value = 'Pr(>|t|)',
+         pathway = 'name') %>%
+  ungroup() %>% # ungroup the data, which has been grouped by name
+  mutate(IRR = exp(estimate)) %>% # make IRR column that is natural log of the estimate from model
+  relocate(IRR, .after = estimate) %>% # out IRR after estimate in data frame
+  adjust_pvalue(method='fdr') %>% # adjust p value with FDR method
+  add_significance() # add significance value to data frame
+
+```
+
+## Run full compound poisson glm
+
+# F0
+
+```{r full F0 cpglm, eval=T}
+# run test glm on one pathway
+cpglm <- ps %>%
+  ps_mutate(Exposure = relevel(Exposure, "DMSO"), Morpholino = relevel(Morpholino, "CoMo"), Treatments = relevel(Treatments, "CoMo_DMSO")) %>%
+  tax_model(
+    type = "cpglm", rank = "Pathway", taxa = taxa_names(ps), 
+    formula = formula(~Morpholino+Exposure+Morpholino:Exposure),
+    return_psx = TRUE,
+    link = 'log'
+  ) 
+
+```
+
+```{r clean up output and summarize F0, eval=T}
+# get the model results
+cpglm_res <- cpglm %>%
+  tax_models_get() %>%
+  flatten() %>%
+  enframe() %>%
+  group_by(name) %>%
+  group_modify(~ {
+    tbl_ttest <- .x %>% pluck('value', 1) %>%
+    parameters(exponentiate = FALSE) # parameters/stats for each pathway/parameter combo
+ }) %>%
+  dplyr::filter(Parameter != "(Intercept)")
+
+cpglm_res %>%
+  datatable(caption = "F0 cpglm results")
+
+# how many pathways?
+unique(cpglm_res$name)
+# 169
+
+# calculate expanded stats and adjust p-value
+cpglm_res_clean <- cpglm %>%
+  tax_models_get() %>%
+  flatten() %>%
+  tibble::enframe() %>%
+  group_by(name) %>%
+  group_modify(~ {
+    tbl_ttest <- .x %>% pluck('value', 1) %>%
+    summary() %>%
+    coef() %>%
+    as_tibble(rownames = 'term')
+  }) %>%
+  rename(estimate = 'Estimate',
+         std.error = 'Std. Error',
+         t.value = 't value',
+         p.value = 'Pr(>|t|)',
+         pathway = 'name') %>%
+  ungroup() %>%
+  mutate(IRR = exp(estimate)) %>%
+  relocate(IRR, .after = estimate) %>%
+  dplyr::filter(term != "(Intercept)")
+
+F0_qval <- qvalue(cpglm_res_clean$p.value)
+cpglm_res2 <- cpglm_res_clean %>%
+  mutate(p.value.adj = F0_qval$qvalues) %>%
+  add_significance()
+
+cpglm_res2 %>%
+  datatable(caption = "F0 cpglm results")
+
+# how many significant pathways?
+sign_cpglm <- cpglm_res2 %>%
+  dplyr::filter(p.value.adj.signif != "ns")
+unique(sign_cpglm$pathway)
+# 58 of these
+
+
+```
+
+# F1
+```{r full F1 cpglm, eval=T}
+# run test glm on one pathway
+cpglmF1 <- psF1 %>%
+  ps_mutate(Exposure = relevel(factor(Exposure), "DMSO"), Morpholino = relevel(factor(Morpholino), "CoMo"), Treatments = relevel(factor(Treatments), "CoMo_DMSO")) %>%
+  tax_model(
+    type = "cpglm", rank = "Pathway", taxa = taxa_names(psF1), 
+    formula = formula(~Morpholino + Exposure + Morpholino:Exposure),
+    return_psx = TRUE,
+    link = 'log'
+  ) 
+
+```
+
+```{r clean up output and summarize F1 , eval=T}
+# get the model results
+cpglm_resF1 <- cpglmF1 %>%
+  tax_models_get() %>%
+  flatten() %>%
+  enframe() %>%
+  group_by(name) %>%
+  group_modify(~ {
+    tbl_ttest <- .x %>% pluck('value', 1) %>%
+    parameters(exponentiate = FALSE) # parameters/stats for each pathway/parameter combo
+ }) %>%
+  dplyr::filter(Parameter != "(Intercept)")
+
+cpglm_resF1 %>%
+  datatable(caption = "F1 cpglm results")
+
+# how many significant pathways?
+unique(cpglm_resF1$name)
+# 174 of these
+
+# calculate expanded stats and adjust p-value
+cpglm_resF1_clean <- cpglmF1 %>%
+  tax_models_get() %>%
+  flatten() %>%
+  tibble::enframe() %>%
+  group_by(name) %>%
+  group_modify(~ {
+    tbl_ttest <- .x %>% pluck('value', 1) %>%
+    summary() %>%
+    coef() %>%
+    as_tibble(rownames = 'term')
+  }) %>%
+  rename(estimate = 'Estimate',
+         std.error = 'Std. Error',
+         t.value = 't value',
+         p.value = 'Pr(>|t|)',
+         pathway = 'name') %>%
+  ungroup() %>%
+  mutate(IRR = exp(estimate)) %>%
+  relocate(IRR, .after = estimate) %>%
+  dplyr::filter(term != "(Intercept)")
+
+F1_qval <- qvalue(cpglm_resF1_clean$p.value)
+cpglm_resF1_2 <- cpglm_resF1_clean %>%
+  mutate(p.value.adj = F1_qval$qvalues) %>%
+  add_significance()
+
+cpglm_resF1_2 %>%
+  datatable(caption = "F1 cpglm results")
+
+# how many significant pathways?
+sign_cpglmF1 <- cpglm_resF1_2 %>%
+  dplyr::filter(p.value.adj.signif != "ns")
+unique(sign_cpglmF1$pathway)
+# 17 of these
+
+
+```
+
+
+# F2
+```{r full F2 cpglm, eval=T}
+# run test glm on one pathway
+cpglmF2 <- psF2 %>%
+  ps_mutate(Exposure = relevel(factor(Exposure), "DMSO"), 
+            Morpholino = relevel(factor(Morpholino), "CoMo"), 
+            Treatments = relevel(factor(Treatments), "CoMo_DMSO")) %>%
+  tax_model(
+    type = "cpglm", rank = "Pathway", taxa = taxa_names(psF2), 
+    formula = formula(~Morpholino+Exposure+Morpholino:Exposure),
+    return_psx = TRUE,
+    link = 'log'
+  ) 
+
+```
+
+```{r clean up output and summarize F2, eval=T}
+# get the model results
+cpglm_resF2 <- cpglmF2 %>%
+  tax_models_get() %>%
+  flatten() %>%
+  enframe() %>%
+  group_by(name) %>%
+  group_modify(~ {
+    tbl_ttest <- .x %>% pluck('value', 1) %>%
+    parameters(exponentiate = FALSE) # parameters/stats for each pathway/parameter combo
+ }) %>%
+  dplyr::filter(Parameter != "(Intercept)")
+
+cpglm_resF2 %>%
+  datatable(caption = "F2 cpglm results")
+
+# how many significant pathways?
+unique(cpglm_resF2$name)
+# 167 of these
+
+# calculate expanded stats and adjust p-value
+cpglm_resF2_clean <- cpglmF2 %>%
+  tax_models_get() %>%
+  flatten() %>%
+  tibble::enframe() %>%
+  group_by(name) %>%
+  group_modify(~ {
+    tbl_ttest <- .x %>% pluck('value', 1) %>%
+    summary() %>%
+    coef() %>%
+    as_tibble(rownames = 'term')
+  }) %>%
+  rename(estimate = 'Estimate',
+         std.error = 'Std. Error',
+         t.value = 't value',
+         p.value = 'Pr(>|t|)',
+         pathway = 'name') %>%
+  ungroup() %>%
+  mutate(IRR = exp(estimate)) %>%
+  relocate(IRR, .after = estimate) %>%
+  dplyr::filter(term != "(Intercept)")
+
+F2_qval <- qvalue(cpglm_resF2_clean$p.value)
+cpglm_resF2_2 <- cpglm_resF2_clean %>%
+  mutate(p.value.adj = F2_qval$qvalues) %>%
+  add_significance()
+
+cpglm_resF2_2 %>%
+  datatable(caption = "F2 cpglm results")
+
+# how many significant pathways?
+sign_cpglmF2_2 <- cpglm_resF2_2 %>%
+  dplyr::filter(p.value.adj.signif != "ns")
+unique(sign_cpglmF2_2$pathway)
+# 63 of these
+
+# write.table(cpglm_resF2_2,
+#             "outputTabsFigs/F2/F2_cpglm_res.txt",
+#             sep = "\t")
+
+```
+
+
+# Whole Dataset
+```{r full cpglm, eval=T}
+# run test glm on one pathway
+cpglmALL <- psALL %>%
+  ps_mutate(Exposure = relevel(Exposure, "DMSO"), 
+            Morpholino = relevel(Morpholino, "CoMo"),
+            Treatments = relevel(Treatments, "CoMo_DMSO")) %>%
+  tax_model(
+    type = "cpglm", rank = "Pathway", taxa = taxa_names(psALL), 
+    formula = formula(~Generation+Treatments+Generation:Treatments),
+    return_psx = TRUE,
+    link = 'log'
+  ) 
+
+```
+
+```{r clean up output and summarize, eval=T}
+# get the model results
+cpglm_resALL <- cpglmALL %>%
+  tax_models_get() %>%
+  flatten() %>%
+  enframe() %>%
+  group_by(name) %>%
+  group_modify(~ {
+    tbl_ttest <- .x %>% pluck('value', 1) %>%
+    parameters(exponentiate = FALSE) # parameters/stats for each pathway/parameter combo
+ }) %>%
+  dplyr::filter(Parameter != "(Intercept)")
+
+cpglm_resALL %>%
+  datatable(caption = "ALL GEN cpglm results")
+
+# how many significant pathways?
+unique(cpglm_resALL$name)
+# 189 of these
+
+
+# calculate expanded stats and adjust p-value
+cpglm_resALL2 <- cpglmALL %>%
+  tax_models_get() %>%
+  flatten() %>%
+  enframe() %>%
+  group_by(name) %>%
+  group_modify(~ {
+    tbl_ttest <- .x %>% pluck('value', 1) %>%
+    summary() %>%
+    coef() %>%
+    as_tibble(rownames = 'term')
+  }) %>%
+  rename(estimate = 'Estimate',
+         std.error = 'Std. Error',
+         t.value = 't value',
+         p.value = 'Pr(>|t|)',
+         pathway = 'name') %>%
+  ungroup() %>%
+  mutate(IRR = exp(estimate)) %>%
+  relocate(IRR, .after = estimate) %>%
+  dplyr::filter(term != "(Intercept)") %>%
+  adjust_pvalue(method='fdr') %>%
+  add_significance()
+
+cpglm_resALL2 %>%
+  datatable(caption = "ALL GEN cpglm results")
+
+# how many significant pathways?
+sign_cpglmALL <- cpglm_resALL2 %>%
+  dplyr::filter(p.value.adj.signif != "ns")
+unique(sign_cpglmALL$pathway)
+# 103 of these
+
+# there were way more significant pathways in whole data set with formula as generation + treatment + generation:treatment than when it was just morph + exp + morph:exp
+
+```
+
+
+## Graphing 
+
+# F0
+```{r graphing a coefficient stats plot for each pathway F0, eval=F}
+# with the IRR, less than 1 would be a negative correlation
+i <- NULL
+pw_list <- unique(sign_cpglm$pathway)
+for (i in pw_list) {
+  pwgraph <- dplyr::filter(cpglm_res2, pathway == i) %>%
+    rename(old_esimate = "estimate",
+           estimate = "IRR")
+  ggcoefstats(pwgraph, 
+              statistic = "t", 
+              conf.int = TRUE, 
+              conf.level = 0.95, 
+              exclude.intercept = FALSE,
+              xlab = "IRR",
+              title = paste0("Pathway ID (MetaCyc): ", i), 
+              vline = FALSE) + 
+    geom_vline(xintercept = 1) + 
+    geom_label(aes(label = paste0("p adj = ", signif(p.value.adj, 2), " ", p.value.adj.signif)), 
+              hjust = 0, 
+              vjust = -0.5) + 
+    xlim(min(pwgraph$estimate)-0.1, max(pwgraph$estimate)+0.2) +
+    annotate("label", x = 1, y = 4.5, label = "negative association <---> positive association")
+  ggsave(paste0(output_dir, "F0/indics/", i, ".tiff"), dpi = 300)
+}
+
+```
+
+# F1
+```{r graphing a coefficient stats plot for each pathway F1, eval=F}
+# with the IRR, less than 1 would be a negative correlation
+i <- NULL
+pw_list <- unique(sign_cpglmF1$pathway)
+for (i in pw_list) {
+  pwgraph <- dplyr::filter(cpglm_resF1_2, pathway == i) %>%
+    rename(old_esimate = "estimate",
+           estimate = "IRR")
+  ggcoefstats(pwgraph, 
+              statistic = "t", 
+              conf.int = TRUE, 
+              conf.level = 0.95, 
+              exclude.intercept = FALSE,
+              xlab = "IRR",
+              title = paste0("Pathway ID (MetaCyc): ", i), 
+              vline = FALSE) + 
+    geom_vline(xintercept = 1) + 
+    geom_label(aes(label = paste0("p adj = ", signif(p.value.adj, 2), " ", p.value.adj.signif)), 
+              hjust = 0, 
+              vjust = -0.5) + 
+    xlim(min(pwgraph$estimate)-0.1, max(pwgraph$estimate)+0.2) +
+    annotate("label", x = 1, y = 4.5, label = "negative association <---> positive association")
+  ggsave(paste0(output_dir, "F1/indics/", i, ".tiff"), dpi = 300)
+}
+
+```
+
+# F2
+```{r graphing a coefficient stats plot for each pathway F2, eval=F}
+# with the IRR, less than 1 would be a negative correlation
+i <- NULL
+pw_list <- unique(sign_cpglmF2_2$pathway)
+for (i in pw_list) {
+  pwgraph <- dplyr::filter(cpglm_resF2_2, pathway == i) %>%
+    rename(old_esimate = "estimate",
+           estimate = "IRR")
+  ggcoefstats(pwgraph, 
+              statistic = "t", 
+              conf.int = TRUE, 
+              conf.level = 0.95, 
+              exclude.intercept = FALSE,
+              xlab = "IRR",
+              title = paste0("Pathway ID (MetaCyc): ", i), 
+              vline = FALSE) + 
+    geom_vline(xintercept = 1) + 
+    geom_label(aes(label = paste0("p adj = ", signif(p.value.adj, 2), " ", p.value.adj.signif)), 
+              hjust = 0, 
+              vjust = -0.5) + 
+    xlim(min(pwgraph$estimate)-0.1, max(pwgraph$estimate)+0.2) +
+    annotate("label", x = 1, y = 4.5, label = "negative association <---> positive association")
+  ggsave(paste0(output_dir, "F2/indics/", i, ".tiff"), dpi = 300)
+}
+
+```
+
+# Whole Dataset
+```{r graphing a coefficient stats plot for each pathway, eval=F}
+# with the IRR, less than 1 would be a negative correlation
+i <- NULL
+pw_list <- unique(sign_cpglmALL$pathway)
+for (i in pw_list) {
+  pwgraph <- dplyr::filter(cpglm_resALL2, pathway == i) %>%
+    rename(old_esimate = "estimate",
+           estimate = "IRR")
+  ggcoefstats(pwgraph, 
+              statistic = "t", 
+              conf.int = TRUE, 
+              conf.level = 0.95, 
+              exclude.intercept = FALSE,
+              xlab = "IRR",
+              title = paste0("Pathway ID (MetaCyc): ", i), 
+              vline = FALSE) + 
+    geom_vline(xintercept = 1) + 
+    geom_label(aes(label = paste0("p adj = ", signif(p.value.adj, 2), " ", p.value.adj.signif)), 
+              hjust = 0, 
+              vjust = -0.5) + 
+    xlim(min(pwgraph$estimate)-0.1, max(pwgraph$estimate)+0.2) +
+    annotate("label", x = 1, y = 4.5, label = "negative association <---> positive association")
+  ggsave(paste0(output_dir, "WholeDataset/indics/", i, ".tiff"), dpi = 300)
+}
+
+```
+
+
+## Combined figs for all data
+
+```{r venn diagram of indicators across whole dataset and per generation, eval=T}
+# make the data frame for graphing
+paths <- list(WholeDataset = sign_cpglmALL$pathway, 
+           F0 = sign_cpglm$pathway, 
+           F1 = sign_cpglmF1$pathway, 
+           F2 = sign_cpglmF2_2$pathway)
+
+# graph a venn diagram of the data
+ggVennDiagram(paths, category.names = c("Whole Dataset",
+                                    "F0 Generation",
+                                    "F1 Generation",
+                                    "F2 Generation"),
+              color = "black") + 
+  scale_fill_gradient(low = "white", high = "red")
+
+
+```
+
+
+```{r heatmap with all significant pathways across generations published figure, eval=T}
+# create data frames
+heat_F0 <- sign_cpglm %>%
+  dplyr::select("pathway", "term", "IRR", "p.value.adj.signif") %>%
+  mutate(Generation = "F0",
+         pathterm = paste0(pathway, term))
+
+heat_F1 <- sign_cpglmF1 %>%
+  dplyr::select("pathway", "term", "IRR", "p.value.adj.signif") %>%
+  mutate(Generation = "F1",
+         pathterm = paste0(pathway, term))
+
+heat_F2 <- sign_cpglmF2_2 %>%
+  dplyr::select("pathway", "term", "IRR", "p.value.adj.signif") %>%
+  mutate(Generation = "F2",
+         pathterm = paste0(pathway, term))
+
+# combine all F0, F1, F2 pathways and treatment terms regardless of repetition
+join_heat2 <- heat_F0 %>%
+  full_join(heat_F1, by = "pathterm") %>%
+  full_join(heat_F2, by = "pathterm")
+
+# F0 
+heat2_F0 <- join_heat2 %>%
+  dplyr::select(Generation.x, IRR.x, p.value.adj.signif.x, 
+                pathway.x, term.x) %>%
+  rename(Generation = Generation.x,
+         IRR = IRR.x,
+         p.value.adj.signif = p.value.adj.signif.x,
+         pathway = pathway.x,
+         term = term.x) %>%
+  mutate(p.value.adj.signif = case_when(p.value.adj.signif != "NA" ~ "*")) %>%
+  filter(if_any(everything(), ~ !is.na(.)))
+
+# F1
+heat2_F1 <- join_heat2 %>%
+  dplyr::select(Generation.y, IRR.y, p.value.adj.signif.y, 
+                pathway.y, term.y) %>%
+  rename(Generation = Generation.y,
+         IRR = IRR.y,
+         p.value.adj.signif = p.value.adj.signif.y,
+         pathway = pathway.y,
+         term = term.y) %>%
+  mutate(p.value.adj.signif = case_when(p.value.adj.signif != "NA" ~ "*")) %>%
+  filter(if_any(everything(), ~ !is.na(.)))
+
+# F2
+heat2_F2 <- join_heat2 %>%
+  dplyr::select(Generation, IRR, p.value.adj.signif, 
+                pathway, term) %>%
+  rename(Generation = Generation,
+         IRR = IRR,
+         p.value.adj.signif = p.value.adj.signif,
+         pathway = pathway,
+         term = term) %>%
+  mutate(p.value.adj.signif = case_when(p.value.adj.signif != "NA" ~ "*")) %>%
+  filter(if_any(everything(), ~ !is.na(.)))
+
+# combine
+heat2_comb<- rbind(heat2_F0, heat2_F1, heat2_F2)
+# numbers of significant associations for x-axis of larger graph
+# none in F0 BaP
+length(which(heat2_F0$term == "MorpholinoAHR2Mo")) # 47
+length(which(heat2_F0$term == "MorpholinoAHR2Mo:ExposureBaP")) # 22
+
+length(which(heat2_F1$term == "ExposureBaP")) #13
+length(which(heat2_F1$term == "MorpholinoAHR2Mo")) # 7
+length(which(heat2_F1$term == "MorpholinoAHR2Mo:ExposureBaP")) # 1
+
+length(which(heat2_F2$term == "ExposureBaP")) # 39
+length(which(heat2_F2$term == "MorpholinoAHR2Mo")) # 58
+length(which(heat2_F2$term == "MorpholinoAHR2Mo:ExposureBaP")) # 25
+
+## make dendrogram for side of heatmap
+# filter otu table by pathways that are in the significant associations file
+otu_tab_heatfilt <- as.data.frame(psALL@otu_table) %>%
+  rownames_to_column("pathways") %>%
+  dplyr::filter(pathways %in% unique(heat2_comb$pathway)) %>%
+  column_to_rownames("pathways")
+# run clustering
+pw_dendro <- as.dendrogram(hclust(d = vegdist(x = otu_tab_heatfilt, 
+                                              method = "bray")))
+# make dendrogram
+library(ggdendro)
+dendro_pwplot <- ggdendrogram(data = pw_dendro, rotate = TRUE) + 
+  theme(axis.text.x = element_text(size = 16),
+        axis.text.y = element_blank()) +
+  scale_y_reverse()
+dendro_pwplot
+
+
+
+## make heatmap graph
+# save this so I can add metadata for colored and cleaned up labels
+# write.table(labels(pw_dendro), file = "outputTabsFigs/WholeDataset/dendro_labspws.txt")
+
+# read in metadata for colors and categories
+graphing_indics <- read.csv("input_files_pub/pwindic_colors.csv") %>%
+  inner_join(heat2_comb, by = "pathway", multiple = "all")
+# Order the levels according to their position in the cluster
+graphing_indics$label <- factor(x = graphing_indics$pathway,
+                             levels = labels(pw_dendro))
+# for set up of the metadata scale
+library(ggnewscale)
+# whole heatmap plot
+heat_pws <- ggplot(data = graphing_indics, aes(x = term, y = label)) +
+  geom_tile(aes(fill = log(IRR)), colour = "white", linetype = 1) +
+  theme_classic() +
+  scale_fill_gradient2(low = "tan", mid = "white", high = "darkgreen", 
+                      midpoint = 0, na.value = "white") + 
+  labs(y = "", x = "Model term") +
+  geom_text(aes(label = p.value.adj.signif)) + 
+  coord_fixed() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        strip.text.y.left = element_text(angle = 0),
+        axis.title.y = element_blank()) +
+  scale_x_discrete(labels = c("BaP Exposure", "AHR2 Morpholino", "Interaction (BaP and AHR2)")) +
+  facet_grid(cols = vars(Generation))
+
+
+# make a scale bar of categories
+# first iteration of this figure, I kept the label names to make sure they were indeed in the same order as the heatmap
+coul <- brewer.pal(10, "Set3") 
+Scale_cats <- ggplot(data = graphing_indics, 
+                     aes(x = 1, y = label,
+                         fill = category)) +
+  geom_tile() +
+  coord_fixed() +
+  labs(fill = "Category", x = "", y = "") +
+  theme(axis.text.x = element_blank(),
+        axis.text.y = element_blank(),
+        axis.ticks = element_blank()) +
+  scale_fill_manual(values = coul)
+
+
+```
+
+```{r indicator figure of taxa from Ebony}
+# this is the taxonomy heatmap
+load("/Users/alexieva/Documents/Projects/Analysis/metagen_zfBaP/16S_Ebony/Figure6.rdata")
+# it's called heattaxa
+
+# modify a bit
+length(which(heattaxa$data$Generation == "F0" & heattaxa$data$term == "ExposureBaP")) # 0
+length(which(heattaxa$data$Generation == "F0" & heattaxa$data$term == "MorpholinoAHR2Mo")) # 1
+length(which(heattaxa$data$Generation == "F0" & heattaxa$data$term == "MorpholinoAHR2Mo:ExposureBaP")) # 4
+
+length(which(heattaxa$data$Generation == "F1" & heattaxa$data$term == "ExposureBaP")) # 4
+length(which(heattaxa$data$Generation == "F1" & heattaxa$data$term == "MorpholinoAHR2Mo")) # 3
+length(which(heattaxa$data$Generation == "F1" & heattaxa$data$term == "MorpholinoAHR2Mo:ExposureBaP")) # 0
+
+length(which(heattaxa$data$Generation == "F2" & heattaxa$data$term == "ExposureBaP")) # 2
+length(which(heattaxa$data$Generation == "F2" & heattaxa$data$term == "MorpholinoAHR2Mo")) # 4
+length(which(heattaxa$data$Generation == "F2" & heattaxa$data$term == "MorpholinoAHR2Mo:ExposureBaP")) # 0
+
+heattaxa2 <- heattaxa + 
+  scale_x_discrete(labels = c("BaP Exposure", "AHR2 Morpholino", "Interaction (BaP and AHR2)"))
+heattaxa2
+
+
+```
+
+```{r manuscript combined figure of both taxa and pathways}
+heattot <- ggarrange(heattaxa2, heat_pws,
+          labels = c("A", "B"),
+          align = "v",
+          ncol = 1, nrow = 2,
+          heights = c(5, 20),
+          widths = c(10, 10),
+          common.legend = TRUE,
+          legend = "right")
+heattot
+
+# add numbers of associations from above chunks in adobe illustrator as well as playing with layout for final figure
+
+```
+
+
+
+Are these pathways coming from specific cell processes and what functions do they serve?
+
+Are these pathways from the same taxa that Ebony found in her indicator taxa analysis?
+
+These are Ebony's indicator taxa:
+
+Acinetobacter
+Chitinimonas
+Comamonadacaea
+Ensifer
+Paraclostridium
+Plesiomonas
+Pseudoduganella
+Rheinheimera
+Shewanella
+Undibacterium
+ZOR0006
+Flavobacterium
+Vibrio
+
+```{r View and save the list of pathways}
+View(as.data.frame(unique(heat2_comb$pathway)))
+# write.table(as.data.frame(unique(heat2_comb$pathway)),
+#             paste0(output_dir, "pathindicslist.txt"),
+#             sep = "\t")
+
+```
+
+I filtered my pathway coverage table from exploratory data R markdown to get a table with the indicator pathways AND their taxonomic date
+
+```{r just my indic pathways with all associated taxa}
+library(stringr)
+pathcovtab_alltaxa <- read.delim(paste0(home_dir, "inputTables/pathcovtab_wtaxa.txt"))
+namestocut_alltaxa <- rownames(as.data.frame(t(pathcovtab_alltaxa)))
+alltaxa_graphdf <- as.data.frame(t(pathcovtab_alltaxa)) %>%
+  mutate(sum = rowSums(as.data.frame(t(pathcovtab_alltaxa)))) %>%
+  rownames_to_column("ID") %>%
+  dplyr::select(ID, sum) %>%
+  mutate(pathway = str_extract_all(namestocut_alltaxa, "^.+PWY|^.+BYPASS|^.+BIOSYNTHESIS.II|^PWY.{0,5}")) %>%
+  mutate(taxa = str_extract_all(namestocut_alltaxa, "g__.+\\.|unclassified")) %>%
+  mutate(ID_clean = paste0(pathway, "_", taxa))
+# remove rows where taxa column has no value and add percentage column based on prevalence
+alltaxa_graphdf <- alltaxa_graphdf[lengths(alltaxa_graphdf$taxa) > 0, ] 
+sums <- alltaxa_graphdf%>%
+  group_by(pathway) %>%
+  summarize(path_sum = sum(sum)) %>%
+  ungroup()
+all_taxa_graphdf_perc <- alltaxa_graphdf %>%
+  left_join(sums, "pathway") %>%
+  mutate(prev_perc = round((sum/path_sum)*100, digits = 1)) %>%
+  filter(prev_perc != 0)
+all_taxa_graphdf_perc$taxa <- as.character(all_taxa_graphdf_perc$taxa)
+all_taxa_graphdf_perc$pathway <- as.character(all_taxa_graphdf_perc$pathway)
+
+ggplot(all_taxa_graphdf_perc, aes(x = factor(1), y = prev_perc, fill = factor(taxa))) +
+  geom_bar(stat = "identity", width = 1) +
+  coord_polar(theta = "y") +
+  geom_text(aes(x = 1.6, label = paste0(prev_perc, "%")), position = position_stack(vjust = 0.5)) +
+  labs(x = NULL, y = NULL, fill = NULL) +
+  theme_classic() +
+  theme(axis.line = element_blank(),
+          axis.text = element_blank(),
+          axis.ticks = element_blank()) +
+  facet_wrap("pathway")
+
+
+```
+
+Then filtered again by the taxa in Ebony's indicators list (above)
+
+```{r Ebony indicator taxa in pathway file?}
+library(stringr)
+pathcovtab_taxa <- read.delim(paste0(home_dir, "inputTables/pathcovtab_filtwtaxa.txt"))
+namestocut <- rownames(as.data.frame(t(pathcovtab_taxa)))
+taxa_graphdf <- as.data.frame(t(pathcovtab_taxa)) %>%
+  mutate(sum = rowSums(as.data.frame(t(pathcovtab_taxa)))) %>%
+  rownames_to_column("ID") %>%
+  dplyr::select(ID, sum) %>%
+  mutate(pathway = str_extract_all(namestocut, "^.+PWY|^.+BYPASS|^.+BIOSYNTHESIS.II|^PWY.{0,5}")) %>%
+  mutate(taxa = str_extract_all(namestocut, "g__.+\\.")) %>%
+  mutate(ID_clean = paste0(pathway, "_", taxa)) %>%
+  arrange(desc(sum))
+
+ggplot(taxa_graphdf, aes(x = reorder(ID_clean, desc(sum)), y = sum)) +
+  geom_col() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1)) +
+  labs(x = "", y = "Prevalence")
+
+```
+
+basically, the answer is yes.
+

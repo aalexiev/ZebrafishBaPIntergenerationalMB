@@ -1,0 +1,90 @@
+﻿pathway,label,category,color
+PWY.5659..GDP.mannose.biosynthesis,PWY-5659: GDP-mannose Biosynthesis,Cell growth cycles,#4B0055
+PWY.5384..sucrose.degradation.IV..sucrose.phosphorylase.,PWY-5384: Sucrose Degradation prior to Bifidiobacterium Shunt,Cell growth cycles,#4B0055
+ANAGLYCOLYSIS.PWY..glycolysis.III..from.glucose.,ANAGLYCOLYSIS-PWY: Glycolysis,Cell growth cycles,#4B0055
+BRANCHED.CHAIN.AA.SYN.PWY..superpathway.of.branched.chain.amino.acid.biosynthesis,BRANCHED-CHAIN-AA-SYN-PWY: Amino Acid Biosynthesis,Cell growth cycles,#4B0055
+CALVIN.PWY..Calvin.Benson.Bassham.cycle,CALVIN-PWY: Sugar Biosynthesis via Calvin Cycle,Cell growth cycles,#4B0055
+FUCCAT.PWY..fucose.degradation,FUCCAT-PWY: L-Fucose Degradation,Cell growth cycles,#4B0055
+GLUCONEO.PWY..gluconeogenesis.I,GLUCONEO-PWY: Gluconeogenesis,Cell growth cycles,#4B0055
+GLYCOCAT.PWY..glycogen.degradation.I,GLYCOCAT-PWY: Glycogen Degradation,Cell growth cycles,#4B0055
+GLYCOGENSYNTH.PWY..glycogen.biosynthesis.I..from.ADP.D.Glucose.,GLYCOGENSYNTH-PWY: Glycogen Degradation,Cell growth cycles,#4B0055
+GLYCOLYSIS..glycolysis.I..from.glucose.6.phosphate.,GLYCOLYSIS: Glycolysis,Cell growth cycles,#4B0055
+GLYCOLYSIS.E.D..superpathway.of.glycolysis.and.the.Entner.Doudoroff.pathway,GLYCOLYSIS-E-D: Glycolysis via Entner-Doudoroff Shunt,Cell growth cycles,#4B0055
+GLYOXYLATE.BYPASS..glyoxylate.cycle,GLYOXYLATE-BYPASS: glyoxylate shunt,Cell growth cycles,#4B0055
+ILEUSYN.PWY..L.isoleucine.biosynthesis.I..from.threonine.,ILEUSYN-PWY: L-isoleucine Biosynthesis,Cell growth cycles,#4B0055
+LEU.DEG2.PWY..L.leucine.degradation.I,LEU-DEG2-PWY: L-leucine Degradation,Cell growth cycles,#4B0055
+NAGLIPASYN.PWY..lipid.IVA.biosynthesis..E..coli.,NAGLIPASYN-PWY: Lipid IVA Biosynthesis,Cell growth cycles,#4B0055
+NONOXIPENT.PWY..pentose.phosphate.pathway..non.oxidative.branch..I,NONOXIPENT-PWY: Pentose Phosphate Pathways,Cell growth cycles,#4B0055
+P42.PWY..incomplete.reductive.TCA.cycle,P42-PWY: Autotrophic CO2 Fixation via Reductive TCA Cycle,Cell growth cycles,#4B0055
+PENTOSE.P.PWY..pentose.phosphate.pathway,PENTOSE-P-PWY: Pentose Phosphate Pathways,Cell growth cycles,#4B0055
+POLYISOPRENSYN.PWY..polyisoprenoid.biosynthesis..E..coli.,POLYISOPRENSYN-PWY: Polyprenyl (IPP) Biosynthesis,Cell growth cycles,#4B0055
+PPGPPMET.PWY..ppGpp.metabolism,PPGPPMET-PWY: Metabolic Regulator Biosynthesis,Cell growth cycles,#4B0055
+PWY.1042..glycolysis.IV,PWY-1042: Glycolysis,Cell growth cycles,#4B0055
+PWY.3001..superpathway.of.L.isoleucine.biosynthesis.I,PWY-3001: L-isoleucine Biosynthesis,Cell growth cycles,#4B0055
+PWY.4984..urea.cycle,PWY-4984: Nitrogen Compound (Urea) Metabolism,Cell growth cycles,#4B0055
+PWY.5121..superpathway.of.geranylgeranyl.diphosphate.biosynthesis.II..via.MEP.,PWY-5121: Geranylgeranyl Diphosphate Biosynthesis,Cell growth cycles,#4B0055
+PWY.5484..glycolysis.II..from.fructose.6.phosphate.,PWY-5484: Glycolysis,Cell growth cycles,#4B0055
+PWY.5723..Rubisco.shunt,PWY-5723: RubisCO Shunt,Cell growth cycles,#4B0055
+PWY.5747..2.methylcitrate.cycle.II,PWY-5747: 2-Methylcitrate Cycle,Cell growth cycles,#4B0055
+PWY.5913..partial.TCA.cycle..obligate.autotrophs.,PWY-5913: aerobic TCA cycle from obligate autotrophs,Cell growth cycles,#4B0055
+PWY.5941..glycogen.degradation.II,PWY-5941: Glycogen Degradation,Cell growth cycles,#4B0055
+PWY.5981..CDP.diacylglycerol.biosynthesis.III,PWY-5981: CDP-diacylglycerol (phospholipids for cell membrane) Biosynthesis,Cell growth cycles,#4B0055
+SALVADEHYPOX.PWY..adenosine.nucleotides.degradation.II,SALVADEHYPOX-PWY: Adenosine Nucleotide Degradation,Cell growth cycles,#4B0055
+SER.GLYSYN.PWY..superpathway.of.L.serine.and.glycine.biosynthesis.I,SER-GLYSYN-PWY: L-serine and Glycine Biosynthesis,Cell growth cycles,#4B0055
+THRESYN.PWY..superpathway.of.L.threonine.biosynthesis,THRESYN-PWY: L-threonine Biosynthesis,Cell growth cycles,#4B0055
+TYRFUMCAT.PWY..L.tyrosine.degradation.I,TYRFUMCAT-PWY: L-tyrosine Degradation,Cell growth cycles,#4B0055
+VALDEG.PWY..L.valine.degradation.I,VALDEG-PWY: L-valine Degradation,Cell growth cycles,#4B0055
+VALSYN.PWY..L.valine.biosynthesis,VALSYN-PWY: L-valine Biosynthesis,Cell growth cycles,#4B0055
+FAO.PWY..fatty.acid..beta..oxidation.I..generic.,FAO-PWY: Fatty Acid Oxydation,Fatty Acid cycles,#44286E
+FASYN.ELONG.PWY..fatty.acid.elongation....saturated,FASYN-ELONG-PWY: Fatty Acid Elongation,Fatty Acid cycles,#44286E
+LIPASYN.PWY..phospholipases,LIPASYN-PWY: Fatty Acid and Lipid Degradation via Phospholipases,Fatty Acid cycles,#44286E
+PHOSLIPSYN.PWY..superpathway.of.phospholipid.biosynthesis.I..bacteria.,PHOSLIPSYN-PWY: Phospholipid Biosynthesis,Fatty Acid cycles,#44286E
+PWY.5136..fatty.acid..beta..oxidation.II..plant.peroxisome.,PWY-5136: Fatty Acid Degradation,Fatty Acid cycles,#44286E
+PWY.5138..fatty.acid..beta..oxidation.IV..unsaturated..even.number.,PWY-5138: Short Chain Fatty Acid Degradation,Fatty Acid cycles,#44286E
+PWY.5973..cis.vaccenate.biosynthesis,PWY-5973: Unsaturated Fatty Acid Biosynthesis,Fatty Acid cycles,#44286E
+FERMENTATION.PWY..mixed.acid.fermentation,FERMENTATION-PWY: Mixed Acid Fermentation,Fermentation,#274983
+P108.PWY..pyruvate.fermentation.to.propanoate.I,P108-PWY: Pyruvate Fermentation to Propanoate,Fermentation,#274983
+P124.PWY..Bifidobacterium.shunt,P124-PWY: Sugar Degradation via Bifidobacterium shunt,Fermentation,#274983
+PWY.5100..pyruvate.fermentation.to.acetate.and.lactate.II,PWY-5100: Pyruvate Fermentation to Acetate and Lactate,Fermentation,#274983
+PWY.5676..acetyl.CoA.fermentation.to.butanoate.II,PWY-5676: Acetyl-CoA Fermentation to Butanoate,Fermentation,#274983
+ARGSYN.PWY..L.arginine.biosynthesis.I..via.L.ornithine.,ARGSYN-PWY: L-arginine Biosynthesis,Neurotransmitter cycles,#006791
+ARGSYNBSUB.PWY..L.arginine.biosynthesis.II..acetyl.cycle.,ARGSYNBSUB-PWY: L-arginine Biosynthesis,Neurotransmitter cycles,#006791
+AST.PWY..L.arginine.degradation.II..AST.pathway.,AST-PWY: L-arginine Degradation,Neurotransmitter cycles,#006791
+CITRULBIO.PWY..L.citrulline.biosynthesis,CITRULBIO-PWY: L-citrulline Biosynthesis,Neurotransmitter cycles,#006791
+GLUTORN.PWY..L.ornithine.biosynthesis.I,GLUTORN-PWY: L-Ornithine Biosynthesis,Neurotransmitter cycles,#006791
+ORNDEG.PWY..superpathway.of.ornithine.degradation,ORNDEG-PWY: L-ornithine Degradation to GABA,Neurotransmitter cycles,#006791
+P101.PWY..ectoine.biosynthesis,P101-PWY: Ectoine Biosynthesis from L-aspertate,Other,#C2DE34
+PANTOSYN.PWY..superpathway.of.coenzyme.A.biosynthesis.I..bacteria.,PANTOSYN-PWY: Coenzyme A Biosynthesis,Other,#C2DE34
+PWY.5972..stearate.biosynthesis.I..animals.,PWY-5972: Stearate Biosynthesis,Other,#C2DE34
+PWY.5989..stearate.biosynthesis.II..bacteria.and.plants.,PWY-5989: Stearate Biosynthesis,Other,#C2DE34
+COLANSYN.PWY..colanic.acid.building.blocks.biosynthesis,COLANSYN-PWY: Colanic acid Biosynthesis,Pathogenesis,#008298
+DTDPRHAMSYN.PWY..dTDP..beta..L.rhamnose.biosynthesis,DTDPRHAMSYN-PWY: dTDP-sugar (L-rhamnose) Biosynthesis,Pathogenesis,#008298
+OANTIGEN.PWY..O.antigen.building.blocks.biosynthesis..E..coli.,OANTIGEN-PWY: O-antigen production for LPS,Pathogenesis,#008298
+P441.PWY..superpathway.of.N.acetylneuraminate.degradation,P441-PWY: Carboxylic Acid (N-acetylneuraminate) Degradation,Pathogenesis,#008298
+PWY.5855..ubiquinol.7.biosynthesis..early.decarboxylation.,PWY-5855: Ubiquinol Biosynthesis,Redox,#009B95
+PWY.5897..superpathway.of.menaquinol.11.biosynthesis,PWY-5897: Menaquinol Biosynthesis,Redox,#009B95
+PWY.5898..superpathway.of.menaquinol.12.biosynthesis,PWY-5898: Menaquinol Biosynthesis,Redox,#009B95
+PWY.5899..superpathway.of.menaquinol.13.biosynthesis,PWY-5899: Menaquinol Biosynthesis,Redox,#009B95
+SULFATE.CYS.PWY..superpathway.of.sulfate.assimilation.and.cysteine.biosynthesis,SULFATE-CYS-PWY: Sulfate Assimilation alongside Cysteine Biosynthesis,Redox,#009B95
+PWY.5837..2.carboxy.1.4.naphthoquinol.biosynthesis,"PWY-5837: 1,4-Dihydroxy-2-Naphthoate Biosynthesis",Vitamins,#00B28A
+BIOTIN.BIOSYNTHESIS.PWY..biotin.biosynthesis.I,BIOTIN-BIOSYNTHESIS-PWY: Biotin Biosynthesis,Vitamins,#00B28A
+COBALSYN.PWY..superpathway.of.adenosylcobalamin.salvage.from.cobinamide.I,COBALSYN-PWY: Adenosylcobalamin Salvage from Cobinamide,Vitamins,#00B28A
+HISDEG.PWY..L.histidine.degradation.I,HISDEG-PWY: L-histidine Degradation,Vitamins,#00B28A
+PANTO.PWY..phosphopantothenate.biosynthesis.I,PANTO-PWY: Phosphopantothenate Biosynthesis,Vitamins,#00B28A
+PWY.3841..folate.transformations.II..plants.,PWY-3841: Folate Transformations,Vitamins,#00B28A
+PWY.5189..tetrapyrrole.biosynthesis.II..from.glycine.,PWY-5189: Tetrapyrrole Biosynthesis,Vitamins,#00B28A
+RIBOSYN2.PWY..flavin.biosynthesis.I..bacteria.and.plants.,RIBOSYN2-PWY: Flavin Biosynthesis,Vitamins,#00B28A
+X1CMET2.PWY..folate.transformations.III..E..coli.,1CMET2-PWY: Folate Transformations,Vitamins,#00B28A
+HEME.BIOSYNTHESIS.II..heme.b.biosynthesis.I..aerobic.,HEME-BIOSYNTHESIS-II: Heme b Biosynthesis (aerobic),Xenobiotic metabolism,#00C475
+HEME.BIOSYNTHESIS.II.1..heme.b.biosynthesis.V..aerobic.,HEME-BIOSYNTHESIS-II-1: Heme b Biosynthesis (aerobic),Xenobiotic metabolism,#00C475
+HEMESYN2.PWY..heme.b.biosynthesis.II..oxygen.independent.,HEMESYN2-PWY: Heme b Biosynthesis (oxygen-independent),Xenobiotic metabolism,#00C475
+P221.PWY..octane.oxidation,P221-PWY: Octane Oxidation,Xenobiotic metabolism,#00C475
+PWY.4041...gamma..glutamyl.cycle,PWY-4041: Reductant (Thiol) Biosynthesis,Xenobiotic metabolism,#00C475
+PWY.5918..superpathway.of.heme.b.biosynthesis.from.glutamate,PWY-5918: Heme b Biosynthesis from Glutamate,Xenobiotic metabolism,#00C475
+PWY.5920..superpathway.of.heme.b.biosynthesis.from.glycine,PWY-5920: Heme b Biosynthesis from Glycine,Xenobiotic metabolism,#00C475
+HOMOSER.METSYN.PWY..L.methionine.biosynthesis.I,HOMOSER-METSYN-PWY: L-methionine Biosynthesis ,DNA methylation,#7ED357
+HSERMETANA.PWY..L.methionine.biosynthesis.III,HSERMETANA-PWY: L-methionine Biosynthesis ,DNA methylation,#7ED357
+MET.SAM.PWY..superpathway.of.S.adenosyl.L.methionine.biosynthesis,MET-SAM-PWY: S-adenosyl-L-methionine Biosynthesis,DNA methylation,#7ED357
+METSYN.PWY..superpathway.of.L.homoserine.and.L.methionine.biosynthesis,METSYN-PWY::-homoserine and L-methionine Biosynthesis ,DNA methylation,#7ED357
+PWY.5345..superpathway.of.L.methionine.biosynthesis..by.sulfhydrylation.,PWY-5345: L-methionine Biosynthesis by Sulfhydrylation,DNA methylation,#7ED357
+PWY.5347..superpathway.of.L.methionine.biosynthesis..transsulfuration.,PWY-5347: L-methionine Biosynthesis by Transsulfuration,DNA methylation,#7ED357

@@ -1,0 +1,962 @@
+---
+title: "Zebrafish BaP study metagenomics preprocessing"
+author: "Alexandra Alexiev"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+# knit options for whole doc. I will add in specific chunks when I don't want this to be the case
+knitr::opts_chunk$set(echo = TRUE, # show code
+                      eval = FALSE, # do not run chunks when knitting
+                      include = TRUE, # include chunk input in final doc
+                      warning = FALSE, # do not show warnings in final doc
+                      message = FALSE, # do not show messages from code in final doc
+                      collapse = TRUE, # when possible, do put multiple outputs in one block
+                      tidy = TRUE, # cleans up code to make more human readable
+                      dpi = 300, # fig resolution
+                      fig.dim = c(9, 5), # the default figure dimensions
+                      out.width = "98%", # the default figure output width
+                      out.height = "98%", # the default figure output height 
+                      cache = TRUE) # dont rerun chunks that haven't been changed
+
+```
+
+## Housekeeping/start up
+Run this every session
+
+```{r libraries and set up, eval=T}
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(knitr)
+library(metaGTx.processing)
+library(magrittr)
+library(stringr)
+set.seed(3)
+home_dir <- "/nfs5/Sharpton_Lab/alexieva/metagen_zfBaP/"
+catseq_dir <- "/nfs5/Sharpton_Lab/alexieva/metagen_zfBaP/catseq_zips/"
+# setwd("/nfs5/Sharpton_Lab/alexieva/metagen_zfBaP/")
+# keep commented out when not in use because fucks up knitting
+
+```
+
+## Save and load workspace
+
+Always run at the beginning and end of each session
+
+```{r save workspace, eval=T}
+# save.image("zfBaP_MGproc.RData")
+load("zfBaP_MGproc.RData")
+
+```
+
+## Concatenate Sequence Files
+
+Because each sample was sequenced on multiple lanes, I have to now concatenate them. I looked into whether concatenating is ok (which seems like it is standard based on many biology forums I checked), and checked that alpha diversity of genes and taxa were the same across lanes from the same sample and that each lane file for a sample had the same sequencing depth (all confirmed).
+
+```{bash copy raw seqs to home_dir, eval=F}
+ssh -p 732 alexieva@shell.cqls.oregonstate.edu # and log in as usual
+qrsh -q darwin@darwin # Sharpton lab compute server
+cd nfs5/Sharpton_Lab/alexieva/metagen_zfBaP # this is my working directory
+screen -S copyseqsalex # make screen in case pipe is broken for some reason
+# copy all files from Tom's directory into mine so I can work with them
+cp -r /home/micro/sharptot/nfs/prod/prod_restructure/projects/BaP_adult_zfish/metagenomes/raw /nfs5/Sharpton_Lab/alexieva/metagen_zfBaP
+# check if all files were transferred
+ls -1 /home/micro/sharptot/nfs/prod/prod_restructure/projects/BaP_adult_zfish/metagenomes/raw | wc -l
+ls -1 /nfs5/Sharpton_Lab/alexieva/metagen_zfBaP/raw | wc -l
+# all got transferred
+
+# meanwhile, also move metadata file from my computer to server folder
+scp -P 732 /Users/alal3493/Documents/Projects/zebrafishBaP/metadata/*.csv alexieva@files.cqls.oregonstate.edu:/nfs5/Sharpton_Lab/alexieva/metagen_zfBaP/metadata
+
+# check if there are files for each sample ID present
+nano seqfilecheck.txt # make empty text file for output
+screen -S checkfilesalex
+samplesList=$(<sample_list.txt) # string of all sample names to iterate through
+cd raw/ # go to this directory
+for i in ${samplesList[@]}; do echo $i ; find *$i*R1*.fastq.gz | wc -l ; done > /nfs5/Sharpton_Lab/alexieva/metagen_zfBaP/seqfilecheck.txt
+# all sample files are present and accounted for
+
+```
+
+```{r read in metadata and clean up, eval=F}
+# read in csv for full metadata file
+metadata_all <- read.csv(paste0(home_dir, "metadata/zfBaP_metadata.csv"), 
+                         header = T) # 425 samples
+# read in all the measurement data
+metadata_fishMeasurements <- read.csv(paste0(home_dir, 
+                                      "metadata/zfBaP_ALLFishMeasurements.csv"),
+                                      header = T) # 425 samples
+
+## join it all into one big file and remove repeated columns
+metadata_allFishMrmnts <- metadata_all %>%
+  inner_join(metadata_fishMeasurements, by = "SampleIDExtra") %>%
+  select(-c("Treatments.y", "Generation.y", "Gender.y", "Morphology.y",
+            "Exposure.y", "FishNumber.y", "Tissue.y", "RunID.y"))
+# remove the .x at the end of some column headers
+colnames(metadata_allFishMrmnts)<-gsub(".x$", "", 
+                                       colnames(metadata_allFishMrmnts))
+# replace + in Treatments column with _
+metadata_allFishMrmnts$Treatments <- gsub("\\+", "_",
+                                          metadata_allFishMrmnts$Treatments)
+# save it 
+# write.csv(metadata_allFishMrmnts, paste0(home_dir, "metadata/zfBaP_ALL.csv"))
+
+```
+
+
+```{r check all files there and make cat seqs commands file, eval=T}
+#extract just the sample column for ease of reference in for loop
+Samps <- metadata_allFishMrmnts$SampleID
+
+# made an empty commands file using nano in terminal
+cmds_catseq <- c()
+
+for (i in 1:length(Samps)) { # for each sample
+  samp_id <- Samps[i]
+  cmd <- paste0("cd /nfs5/Sharpton_Lab/alexieva/metagen_zfBaP/raw ; zcat *", samp_id, "*R1*.fastq.gz > catseqs/", samp_id, "_R1.fastq ;") # paste this line that uses the sample name
+  cmds_catseq[i] <- cmd
+  
+}
+head(cmds_catseq) # check looks good
+length(cmds_catseq) # check got to correct length
+writeLines(cmds_catseq,
+           con = file(paste0(home_dir, "Jobs/zcat_seqs.txt")))
+close(file(paste0(home_dir, "Jobs/zcat_seqs.txt")))
+# only doing for R1 forward reads because paired doesn't add any information
+
+```
+
+Put into SGE_Array script to run quickly
+```{bash SGE and check zcat seqs, eval=F}
+# SGE submission script that is run from Vaughan server
+mkdir raw/catseqs
+cd /nfs5/Sharpton_Lab/alexieva/metagen_zfBaP/SGE_outputs/
+screen -S catseqsalexieva
+SGE_Array -c /nfs5/Sharpton_Lab/alexieva/metagen_zfBaP/Jobs/zcat_seqs.txt -q darwin@darwin -P 10 -b 5 -f 50G
+# c is the command file
+# q is the server name
+# P is processors
+# b is for threads
+# f is for memory
+
+# job ID: 9940457
+qstat # to check status of job
+screen -d # to detach
+screen -r # to reattach and check on process
+# time start: Aug.15.2022 12:36:35
+# time end: Aug.15.2022 15:56
+# check folder to see if it worked, count number of files
+cd /nfs5/Sharpton_Lab/alexieva/metagen_zfBaP/catseqs
+ls -1 | wc -l
+# this is the right number of files
+# check they have something in them
+ls -s
+# all have information in them
+
+```
+
+
+# Check sequence distribution of files
+
+We want to make sure the distribution of sequence depth is even across files. If not, we'll have to rarefy. Also confirms if the humann normalization method will be appropriate.
+
+```{bash for loop to grep sequence counts, eval=F}
+nano rawseqttls.txt # make empty text file for output
+screen -S seqcountsalexieva
+cd catseqs
+for f in *.fastq ; do echo ${f} ; grep -o -i ^@ ${f} | wc -l ; done > /nfs5/Sharpton_Lab/alexieva/metagen_zfBaP/rawseqttls.txt
+
+```
+
+```{r sequence distribution graph, eval=F}
+# need to read in seq counts from above chunk
+# odd rows have sample IDs and even rows have seq count so need to separate into two columns
+rawseq_ttls <- read.delim(paste0(home_dir, "rawseqttls.txt"), 
+                          header = F, sep = "\t") %>%
+  mutate(ind = rep(c(1, 2),length.out = n())) %>%
+  group_by(ind) %>%
+  mutate(id = row_number()) %>%
+  spread(ind, V1) %>%
+  select(-id) %>%
+  mutate(ind = rep(1)) # add a column of 1 repeated for purpose of graphing x axis in plot
+names(rawseq_ttls)[1] <- "SampleID"
+names(rawseq_ttls)[2] <- "TotalSequenceCount"
+rawseq_ttls$TotalSequenceCount <- as.numeric(rawseq_ttls$TotalSequenceCount)
+
+```
+
+```{r show table and hist of seq ttls, eval=T}
+kable(rawseq_ttls[1:2])
+hist(rawseq_ttls$TotalSequenceCount, 
+     xlab = "raw sequence count per sample",
+     main = "")
+
+```
+
+```{r boxplot of sequence counts and stats, eval=T}
+# boxplot with stats
+min(rawseq_ttls$TotalSequenceCount)
+max(rawseq_ttls$TotalSequenceCount)
+seq_box <- ggplot(data = rawseq_ttls, aes(x = ind, 
+                                          y = TotalSequenceCount)) +
+  geom_boxplot(outlier.shape = NA, width = 0.5) +
+  geom_point(position = position_jitter(width = 0.25), alpha = 0.5) +
+  xlab("All Samples (n = 425)") +
+  ylab("raw sequence count per sample") +
+  theme(axis.text.x = element_blank()) +
+  ylim(c(0, 9.5e6)) +
+  geom_text(x = 1, y = 9e6, size = 4,
+            label = "min seq count = 15,230 \n max seq count = 7,644,649 \n median = 3,462,049") # the min and max of the whole dataset with median from table below
+seq_box
+# ggsave(paste0(home_dir, "figs/seqboxplot.tiff"), seq_box, 
+#        dpi = 300, width = 7, height = 6)
+seqbox_stats <- layer_data(seq_box)
+kable(seqbox_stats[1:6], caption = "Stats from boxplot of sequence counts")
+# ymin is the min excluding outliers
+# lower is the 25th percentile value
+# middle is the median
+# upper is the 75th percentile value
+# ymax is the max excluding outliers
+# outliers are listed
+
+```
+
+Some samples are quite low in sequence count so want to make sure they're not all from the same sample or something.
+
+```{r table sample metadata with sequence count, eval=T}
+seqcnt_metadata <- rawseq_ttls %>%
+  select(-ind) %>%
+  rename(SeqFileName = SampleID) %>%
+  mutate(SampleID = substr(SeqFileName, 1, 8)) %>%
+  full_join(metadata_all, by = "SampleID") %>%
+  select(-SampleIDExtra)
+kable(seqcnt_metadata)
+# write.table(seqcnt_metadata, 
+#             file = paste0(home_dir, "figs/seqcnt_metadata.txt"),
+#             sep = "\t")
+
+# only the ones that are outliers
+outlier_seqs <- unlist(seqbox_stats$outliers)
+outlier_metadata <- filter(seqcnt_metadata, TotalSequenceCount %in% outlier_seqs)
+kable(outlier_metadata)
+# write.table(outlier_metadata, 
+#             file = paste0(home_dir, "figs/outlier_metadata.txt"),
+#             sep = "\t")
+
+```
+
+
+
+## Begin Processing Metagenomic Files
+
+# Before I start, I have to rezip the fastq files for this workflow to work
+```{bash zip fastqs, eval=F}
+# copy folder of concatenated seq files into new file
+mkdir catseq_zips
+cp catseqs/* catseq_zips
+ls -1 catseq_zips | wc -l
+# zip them all up
+gzip catseq_zips/*
+
+```
+
+# Now create environment and do other set up steps
+```{r set up steps and run.env, eval=F}
+# create processing environment to make output commands and files
+# create.processing.env(
+#   interactive = FALSE,
+#   job.queue = "darwin@darwin",
+#   jobs.dir = "/nfs5/Sharpton_Lab/alexieva/metagen_zfBaP/Jobs",
+#   max.cores = 200,
+#   max.concurrent.jobs = 4,
+#   base.dir = "/nfs5/Sharpton_Lab/alexieva/metagen_zfBaP",
+#   raw.seq.dirs = "/nfs5/Sharpton_Lab/alexieva/metagen_zfBaP/catseq_zips",
+#   store.dir = "/nfs5/Sharpton_Lab/alexieva/metagen_zfBaP/outputs",
+#   link.dir = file.path(base.dir, "WorkingFiles"),
+#   temp.dir = file.path(base.dir, "Results"), # optional, a directory for writing immediate output that will then get, e.g. zipped and moved to the store.dir
+#   max.memory = "100G",
+#   knead.host.db = "/nfs5/Sharpton_Lab/alexieva/public_databases/zebrafishGRCz11_genome_jul182022/zebrafish_db",
+#   samples = print(Samps),
+#   save.env.dir = "Run_envs" # for saving this processing environment for future use or to share with others.
+# )
+
+# can use existing environment file after running above lines once
+load("Run_envs/metaGTx_processing_environment_2022-08-18_13-00-21.RData")
+
+# set some objects to hold this information
+concurrent.jobs <- ifelse(run.env$interactive, 1, run.env$max.concurrent.jobs)
+cores.per.job <- floor(run.env$max.cores / concurrent.jobs)
+
+# set up folder system (only if they don't already exist)
+for (dir in c(run.env$link.dir, run.env$temp.dir, run.env$store.dir)) {
+  if (!dir.exists(dir)) { dir.create(dir) }
+}
+
+```
+
+```{bash move around files to organize, eval=F}
+# move some of these sequence files elsewhere
+mkdir RAWseqs
+mv raw/ RAWseqs
+mv catseqs/ RAWseqs
+mv *.txt RAWseqs
+
+```
+
+
+# Step 1: kneaddata on files
+
+KneadData (from the Huttenhower lab) does quality control on the data. It removes contaminant reads that match the host (via Bowtie2). It also trims to sequences with Trimmomatic. More here: https://github.com/biobakery/kneaddata#paired-end-run 
+
+```{r kneaddata set up, eval=F}
+# set symlinks so original files don't get messed up
+setwd(run.env$link.dir)
+symlink.raw.fastqs(
+  fastq.dirs = run.env$raw.seq.dirs,
+  pattern = ".*fastq\\.gz",
+  delim = "_R1", # get this from raw fastq file names
+  sample.field = 1 # get this from raw fastq file names
+)
+setwd(run.env$base.dir)
+
+# make output directories if they don't already exist
+knead.output <- file.path(run.env$store.dir, "KneadData_output") # path to store QC'd sequences
+knead.other <- file.path(run.env$store.dir, "KneadData_other") # path for other kneaddata output files
+knead.array.file <- file.path(run.env$jobs.dir, "kneaddata_array_commands.txt")
+for (dir in c(knead.output, knead.other)) {
+  if (!dir.exists(dir)) { dir.create(dir) }
+}
+
+```
+
+```{r make kneaddata commands to run on server}
+commands <- generate.full.commands(
+  tool = "kneaddata",
+  paired = FALSE,
+  input.dir = run.env$link.dir,
+  output.dir = run.env$store.dir,
+  tmp.dir = run.env$temp.dir,
+  reference.db = run.env$knead.host.db,
+  threads = cores.per.job,
+  zip.output = TRUE,
+  write.to = knead.array.file
+)
+head(commands) # inspect commands for accuracy
+if (run.env$interactive) {
+  execute.commands(commands)
+} else {
+  generate.SGE.command(
+    c = knead.array.file,
+    q = run.env$job.queue,
+    P = cores.per.job,
+    b = concurrent.jobs,
+    f = run.env$max.memory,
+    qsub_options = run.env$qsub.options
+  )
+  # Submit job with printed command from appropriate machine
+}
+
+```
+
+```{bash SGE command to run kneaddata, eval=F}
+# log into Vaughan server
+screen -S kneaddataalexieva
+cd /nfs5/Sharpton_Lab/alexieva/metagen_zfBaP/SGE_outputs
+
+SGE_Array -c /nfs5/Sharpton_Lab/alexieva/metagen_zfBaP/Jobs/kneaddata_array_commands.txt -q darwin@darwin -P 50 -b 4 -f 100G
+# job ID: 9943489
+qstat # to check status of job
+screen -d # to detach
+screen -r # to reattach and check on process
+# time start: Aug.18.2022 13:06
+# time end: Aug.22.2022 1:41
+
+```
+
+```{r move kneaddata outputs, eval=F}
+# move files with file name BaP_###--R1_kneaddata.fastq
+move.files(
+  move.from = run.env$store.dir,
+  move.to = knead.output,
+  match.pattern = "kneaddata.fastq.gz"
+)
+# move the rest of the intermediate files from kneaddata
+move.files(
+  move.from = run.env$store.dir,
+  move.to = knead.other,
+  match.pattern = "\\.gz$"
+)
+
+```
+
+```{bash check all files made}
+cd outputs/KneadData_output/
+
+# check 425 files exist
+ls -1 | wc -l
+# all there
+
+# check they have file sizes that make sense (no empties)
+ls -s
+# all files have data in them
+
+```
+
+
+# Step 2: Run Humann on files
+
+Humann profiles the presence/absence and abundance of microbial gene pathways from metagenomic sequence data. See more here: https://github.com/biobakery/humann#how-to-run 
+
+```{r humann file/folder set up, eval=F}
+# set new symlinks in working files folder
+setwd(run.env$link.dir)
+file.remove(list.files())
+symlink.files(
+  file.dir = knead.output,
+  pattern = "kneaddata.fastq.gz"
+)
+setwd(run.env$base.dir)
+
+# create new directories for outputs
+humann.output <- file.path(run.env$store.dir, "Humann_output")
+humann.array.file <- file.path(run.env$jobs.dir, "humann_array_commands.txt")
+
+if (!dir.exists(humann.output)) { dir.create(humann.output) }
+
+```
+
+```{r create and run humann commands on SGE queuing system on server}
+commands <- generate.full.commands(
+  tool = "humann",
+  paired = FALSE,
+  input.dir = run.env$link.dir,
+  output.dir = humann.output,
+  tmp.dir = run.env$temp.dir,
+  threads = cores.per.job,
+  write.to = humann.array.file
+) 
+# above code gives error "can only write character objects
+# tried defining all arguments explicitly, checked all arguments are correct
+# ran the source code for the function and got a commands file, so going to use that in the absence of a better solution
+head(commands) # inspect commands for accuracy
+if (run.env$interactive) {
+  execute.commands(commands)
+} else {
+  generate.SGE.command(
+    c = humann.array.file,
+    q = run.env$job.queue,
+    P = cores.per.job,
+    b = concurrent.jobs,
+    f = run.env$max.memory
+  )
+  ## Submit job with printed command from appropriate machine
+}
+
+```
+
+```{bash SGE command to run humann, eval=F}
+# log into Vaughan server
+screen -S humannalexieva
+cd /nfs5/Sharpton_Lab/alexieva/metagen_zfBaP/SGE_outputs
+
+# have to reconfigure the databases before starting
+humann_config --update database_folders nucleotide /nfs3/Sharpton_Lab/public_databases/chocophlan
+humann_config # check
+
+SGE_Array -c /nfs5/Sharpton_Lab/alexieva/metagen_zfBaP/Jobs/humann_array_commands.txt -q darwin@papilio -P 200 -b 4 -f 100G
+# job ID: 9946562
+qstat # to check status of job
+screen -d # to detach
+screen -r 10568.humannalexieva # to reattach and check on process
+# time start: Aug.23.2022 16:03:44
+##THIS IS TAKING TOO LONG, MOVING TO DIFFERENT SERVER
+# time killed job: 
+# qdel 9946562 to stop process
+
+```
+
+# Pause job and continue on different server partition
+Partway through running the humann job on darwin server, we realized it would max out the file limit for unix and it was slowing down the server. Paused that job, determined which files were done and which weren't, and restarted on a different partition on darwin with more power and in batches of 20 files.
+
+```{bash check which files are done, eval=F}
+## first test run on papilio server to see how long one sample takes
+SGE_Array -c /nfs5/Sharpton_Lab/alexieva/metagen_testzfBAP/BaP0004CAT_test/Jobs/TESThumann_array_commands.txt -q darwin@papilio -P 200 -b 4 -f 100G
+# threads for humann are 200 just to see how it goes when maxed out
+# job ID: 9953906
+# time start: Aug.30.2022 13:30:57
+# time end: Aug.30.2022 14:24
+# elapsed time is about an hour for one sample
+
+## Write script to see which samples are done and which are not and which is intermediate
+# this loops through the sample IDs and matches files with that sample ID; will print done for files that are at 4 files, not done for those with 0 files, and left off for the file that has intermediate files; also removes the files for the left off sample and the workingfiles for the done samples
+
+# run a test on copied data
+# make sure you're in /nfs5/Sharpton_Lab/alexieva/metagen_zfBaP
+mkdir testfilecheck
+cp outputs/Humann_output/BaP_086[789]* testfilecheck/
+rm testfilecheck/BaP_0867--R1_kneaddata_humann_temp.tgz
+cd testfilecheck
+samplesList=$(<shortsample_list.txt)
+for i in ${samplesList[@]}; do echo $i; count=$(find $i* | wc -l); if ((count == 4)); then rm $i*; echo "done"; elif ((count >= 1 && $count <= 3)); then rm $i*; echo "left off" ; elif ((count == 0)); then echo "not done"; fi; done > /nfs5/Sharpton_Lab/alexieva/metagen_zfBaP/testfilecheck/checkoutput.txt
+# works as expected
+
+## Run file check script on output folder
+# Stop Darwin job
+qdel 9946562
+
+# run script
+cd /nfs5/Sharpton_Lab/alexieva/metagen_zfBaP/outputs/Humann_output
+samplesList=$(<sample_list.txt)
+for i in ${samplesList[@]}; do echo $i; count=$(find $i* | wc -l); if ((count == 4)); then echo "done"; elif ((count >= 1 && $count <= 3)); then echo "left off"; elif ((count == 0)); then echo "not done"; fi; done > /nfs5/Sharpton_Lab/alexieva/metagen_zfBaP/outputs/Humann_output/checkoutput.txt
+# look at left off vs done samples
+
+# run full version that also moves files
+for i in ${samplesList[@]}; do echo $i; count=$(find $i* | wc -l); if ((count == 4)); then rm /nfs5/Sharpton_Lab/alexieva/metagen_zfBaP/WorkingFiles/$i*; echo "done"; elif ((count >= 1 && $count <= 3)); then rm $i*; echo "left off" ; elif ((count == 0)); then echo "not done"; fi; done > /nfs5/Sharpton_Lab/alexieva/metagen_zfBaP/testfilecheck/checkoutput.txt
+
+## Create batch directories of 50 samples from those left in WorkingFiles
+# this loop creates directories called batch# and puts 50 files in it
+cd ../../WorkingFiles
+i=0; for f in *; do d=batch$(printf %d $((i/50+1))); mkdir -p $d; mv "$f" $d; let i++; done
+
+# make sample ID files for each batch
+cd batch1
+find -name "BaP*" > ../b1sample_ID.txt
+cd ../batch2
+find -name "BaP*" > ../b2sample_ID.txt
+cd ../batch3
+find -name "BaP*" > ../b3sample_ID.txt
+cd ../batch4
+find -name "BaP*" > ../b4sample_ID.txt
+cd ../batch5
+find -name "BaP*" > ../b5sample_ID.txt
+
+# move existing files into a new directory
+cd ../outputs/Humann_output
+mkdir ../batch0
+mv *gz ../batch0
+mv ../batch0 .
+
+```
+
+```{r read in and clean up sample ID files for each batch, eval=F}
+## batch 1
+b1_samps <- as.vector(unlist(read.delim(paste0(run.env$link.dir, "/b1sample_ID.txt"),
+                       sep = "\t", header = F)))
+b1_samps <- gsub("^./", "", b1_samps)
+b1_samps <- gsub("--R1_kneaddata.fastq.gz", "", b1_samps)
+## batch 2
+b2_samps <- as.vector(unlist(read.delim(paste0(run.env$link.dir, "/b2sample_ID.txt"),
+                       sep = "\t", header = F)))
+b2_samps <- gsub("^./", "", b2_samps)
+b2_samps <- gsub("--R1_kneaddata.fastq.gz", "", b2_samps)
+## batch 3
+b3_samps <- as.vector(unlist(read.delim(paste0(run.env$link.dir, "/b3sample_ID.txt"),
+                       sep = "\t", header = F)))
+b3_samps <- gsub("^./", "", b3_samps)
+b3_samps <- gsub("--R1_kneaddata.fastq.gz", "", b3_samps)
+## batch 4
+b4_samps <- as.vector(unlist(read.delim(paste0(run.env$link.dir, "/b4sample_ID.txt"),
+                       sep = "\t", header = F)))
+b4_samps <- gsub("^./", "", b4_samps)
+b4_samps <- gsub("--R1_kneaddata.fastq.gz", "", b4_samps)
+## batch 5
+b5_samps <- as.vector(unlist(read.delim(paste0(run.env$link.dir, "/b5sample_ID.txt"),
+                       sep = "\t", header = F)))
+b5_samps <- gsub("^./", "", b5_samps)
+b5_samps <- gsub("--R1_kneaddata.fastq.gz", "", b5_samps)
+
+```
+
+
+```{r create commands and SGE script for batches of 20 samples, eval=F}
+## batch 1
+# change samples in run.env
+cores.per.job <- 200
+run.env$samples <- b1_samps
+
+# make commands file
+commands <- generate.full.commands(
+  tool = "humann",
+  paired = FALSE,
+  input.dir = paste0(run.env$link.dir, "/batch1"),
+  output.dir = paste0(humann.output, "/batch1"),
+  tmp.dir = "/data2/alexieva",
+  threads = 200,
+  write.to = "/nfs5/Sharpton_Lab/alexieva/metagen_zfBaP/Jobs/humann_B1_commands.txt"
+) 
+head(commands) # inspect commands for accuracy
+if (run.env$interactive) {
+  execute.commands(commands)
+} else {
+  generate.SGE.command(
+    c = "/nfs5/Sharpton_Lab/alexieva/metagen_zfBaP/Jobs/humann_B1_commands.txt",
+    q = "darwin@papilio",
+    P = 200,
+    b = concurrent.jobs,
+    f = run.env$max.memory
+  )
+  ## Submit job with printed command from appropriate machine
+}
+
+
+## batch 2
+run.env$samples <- b2_samps
+commands <- generate.full.commands(
+  tool = "humann",
+  paired = FALSE,
+  input.dir = paste0(run.env$link.dir, "/batch2"),
+  output.dir = paste0(humann.output, "/batch2"),
+  tmp.dir = "/data2/alexieva",
+  threads = 200,
+  write.to = "/nfs5/Sharpton_Lab/alexieva/metagen_zfBaP/Jobs/humann_B2_commands.txt"
+) 
+head(commands) # inspect commands for accuracy
+if (run.env$interactive) {
+  execute.commands(commands)
+} else {
+  generate.SGE.command(
+    c = "/nfs5/Sharpton_Lab/alexieva/metagen_zfBaP/Jobs/humann_B2_commands.txt",
+    q = "darwin@papilio",
+    P = 200,
+    b = concurrent.jobs,
+    f = run.env$max.memory
+  )
+  ## Submit job with printed command from appropriate machine
+}
+
+## batch 3
+run.env$samples <- b3_samps
+commands <- generate.full.commands(
+  tool = "humann",
+  paired = FALSE,
+  input.dir = paste0(run.env$link.dir, "/batch3"),
+  output.dir = paste0(humann.output, "/batch3"),
+  tmp.dir = "/data2/alexieva",
+  threads = 200,
+  write.to = "/nfs5/Sharpton_Lab/alexieva/metagen_zfBaP/Jobs/humann_B3_commands.txt"
+) 
+head(commands) # inspect commands for accuracy
+if (run.env$interactive) {
+  execute.commands(commands)
+} else {
+  generate.SGE.command(
+    c = "/nfs5/Sharpton_Lab/alexieva/metagen_zfBaP/Jobs/humann_B3_commands.txt",
+    q = "darwin@papilio",
+    P = 200,
+    b = concurrent.jobs,
+    f = run.env$max.memory
+  )
+  ## Submit job with printed command from appropriate machine
+}
+
+## batch 4
+run.env$samples <- b4_samps
+commands <- generate.full.commands(
+  tool = "humann",
+  paired = FALSE,
+  input.dir = paste0(run.env$link.dir, "/batch4"),
+  output.dir = paste0(humann.output, "/batch4"),
+  tmp.dir = "/data2/alexieva",
+  threads = 200,
+  write.to = "/nfs5/Sharpton_Lab/alexieva/metagen_zfBaP/Jobs/humann_B4_commands.txt"
+) 
+head(commands) # inspect commands for accuracy
+if (run.env$interactive) {
+  execute.commands(commands)
+} else {
+  generate.SGE.command(
+    c = "/nfs5/Sharpton_Lab/alexieva/metagen_zfBaP/Jobs/humann_B4_commands.txt",
+    q = "darwin@papilio",
+    P = 200,
+    b = concurrent.jobs,
+    f = run.env$max.memory
+  )
+  ## Submit job with printed command from appropriate machine
+}
+
+## batch 5
+run.env$samples <- b5_samps
+commands <- generate.full.commands(
+  tool = "humann",
+  paired = FALSE,
+  input.dir = paste0(run.env$link.dir, "/batch5"),
+  output.dir = paste0(humann.output, "/batch5"),
+  tmp.dir = "/data2/alexieva",
+  threads = 200,
+  write.to = "/nfs5/Sharpton_Lab/alexieva/metagen_zfBaP/Jobs/humann_B5_commands.txt"
+) 
+head(commands) # inspect commands for accuracy
+if (run.env$interactive) {
+  execute.commands(commands)
+} else {
+  generate.SGE.command(
+    c = "/nfs5/Sharpton_Lab/alexieva/metagen_zfBaP/Jobs/humann_B5_commands.txt",
+    q = "darwin@papilio",
+    P = 200,
+    b = concurrent.jobs,
+    f = run.env$max.memory
+  )
+  ## Submit job with printed command from appropriate machine
+}
+
+```
+
+```{bash SGE commands to run on batches of files, eval=F}
+## move to /data2 folder on papilio
+cd /nfs5/Sharpton_Lab/alexieva/metagen_zfBaP/SGE_outputs
+
+## batch 1
+SGE_Array -c /nfs5/Sharpton_Lab/alexieva/metagen_zfBaP/Jobs/humann_B1_commands.txt -q darwin@papilio -P 200 -b 4 -f 100G
+# job ID: 9954136
+# time start: Aug.31.2022 13:50:34
+# time end: Sept.1.2022 04:41
+# should take about 2ish days (50 hrs)...took day and a half ish
+
+## batch 2
+SGE_Array -c /nfs5/Sharpton_Lab/alexieva/metagen_zfBaP/Jobs/humann_B2_commands.txt -q darwin@papilio -P 200 -b 4 -f 100G
+# job ID: 9955168
+# time start: Sept.3.2022 00:52:21
+# time end: Sept.3.2022 22:07
+
+## batch 3
+SGE_Array -c /nfs5/Sharpton_Lab/alexieva/metagen_zfBaP/Jobs/humann_B3_commands.txt -q darwin@papilio -P 200 -b 4 -f 100G
+# job ID: 9957226
+# time start: Sept.6.2022 09:50:40
+# time end: Sept.6.2022 23:20
+
+## batch 4
+SGE_Array -c /nfs5/Sharpton_Lab/alexieva/metagen_zfBaP/Jobs/humann_B4_commands.txt -q darwin@papilio -P 200 -b 4 -f 100G
+# job ID: 9958348
+# time start: Sept.7.2022 11:27:22
+# time end: Sept.8.2022 12:08
+
+## batch 5
+SGE_Array -c /nfs5/Sharpton_Lab/alexieva/metagen_zfBaP/Jobs/humann_B5_commands.txt -q darwin@papilio -P 200 -b 4 -f 100G
+# job ID: 9958554
+# time start: Sept.8.2022 11:21:32
+# time end: Sept.8.2022 19:26
+
+# move outputs from /data2/alexieva to outputs/Humann_output
+# check if anything made it to batch4 and batch5 folders, if not, delete them
+cd /nfs5/Sharpton_Lab/alexieva/metagen_zfBaP/SGE_outputs
+SGE_Batch -c "mv /nfs5/Sharpton_Lab/alexieva/metagen_zfBaP/outputs/Humann_output/batch0/* /nfs5/Sharpton_Lab/alexieva/metagen_zfBaP/outputs/Humann_output" -q darwin@papilio -P 200 -b 4 -f 100G -r movebatch0output
+# job id 9959065
+ls /nfs5/Sharpton_Lab/alexieva/metagen_zfBaP/outputs/Humann_output/batch0 # should be empty now
+rm /nfs5/Sharpton_Lab/alexieva/metagen_zfBaP/outputs/Humann_output/batch0
+
+# copy temp files from data2/alexieva to Results folder in working directory
+SGE_Batch -c "cp -r /data2/alexieva/* /nfs5/Sharpton_Lab/alexieva/metagen_zfBaP/Results" -q darwin@papilio -P 200 -b 4 -f 100G -r cptemp2results
+# job id 9959080
+
+# gzip all tsvs on papilio scratch drive
+SGE_Batch -c "gzip /data2/alexieva/*.tsv" -q darwin@papilio -P 200 -b 4 -f 100G -r gziptsvs
+# job id 9959078
+
+# move all tsv.gz files from papilio scratch drive to humann output folder on vaughan
+SGE_Batch -c "mv /data2/alexieva/*.tsv.gz /nfs5/Sharpton_Lab/alexieva/metagen_zfBaP/outputs/Humann_output" -q darwin@papilio -P 200 -b 4 -f 100G -r movebatch12345tsvgz
+# job id 9960198
+
+# tar zip temp folders on data2 on papilio
+# put into a command file
+SGE_Array -c /nfs5/Sharpton_Lab/alexieva/metagen_zfBaP/Jobs/ziptempspapilio.txt -q darwin@papilio -P 200 -b 4 -f 100G -r gziptemps 
+# job id 9960830
+# test took a couple minutes per folder, I have 225 folders, so about 7.5 hrs
+
+# move tar zipped files to Humann_output
+SGE_Batch -c "mv /data2/alexieva/*R1_kneaddata_humann_temp.tgz /nfs5/Sharpton_Lab/alexieva/metagen_zfBaP/outputs/Humann_output" -q darwin@papilio -P 200 -b 4 -f 100G -r movebatch12345temptgz
+# job id 9961080
+
+ls # should be empty now
+# remove the back up temp files in Results and on data2
+cd /nfs5/Sharpton_lab/alexieva/metagen_zfBaP/Results
+yes | rm -r *
+qrsh -q darwin@papilio
+cd /data2/alexieva
+yes | rm -r *
+
+```
+
+
+```{r extract humann output files that are useful and move them, eval=F}
+get.pct.unalign(
+  location = humann.output,
+  out.file = file.path(humann.output, "pct_unaligned.csv")
+)
+# extract.metaphlan2.files(location = humann.output, move.to = humann.output)
+# this is taking a while to run and keeps getting interrupted when Rstudio times out in chrome, so I'm going to put it into a job script and try to get SGE queue to do it
+
+```
+
+```{bash SGE script for extracting metaphlan outputs, eval=F}
+SGE_Batch -c "Rscript extract_metaphlan.R" -q darwin@darwin -P 10 -b 5 -f 50G -r extract_metaphlan
+# job id 9966960
+
+# check 850 files were made
+ls -dq *metaphlan* | wc -l
+# they do, I can move on
+
+```
+
+
+```{r finish moving humann outputs and make working links, eval=F}
+setwd(run.env$link.dir)
+file.remove(list.files())
+gunzip.files(location = humann.output, match.pattern = "tsv.gz")
+symlink.files(
+  file.dir = humann.output,
+  pattern = "tsv"
+)
+setwd(run.env$base.dir)
+
+```
+
+
+
+# Step 3: Organize the output
+
+
+- normalize by calculating relative abundance for genes and pathways, etc.
+
+```{r renormalize abundanceds, eval=F}
+curr.tool <- "humann_renorm_table"
+show.tool.help(curr.tool)
+new.abund.type <- "relab"
+output.dir <- run.env$temp.dir
+abund.files <- list.files(
+  path = run.env$link.dir,
+  pattern = "families|abundance",
+  full.names = TRUE
+)
+for (sample in run.env$samples) {
+  files <- str_subset(abund.files, pattern = sample)
+  for (in.file in files) {
+    out.file <- file.path(
+      output.dir,
+      str_replace(
+        basename(in.file), "(families|abundance)", paste0("\\1_", new.abund.type)
+      )
+    )
+    generate.tool.command(
+      tool = curr.tool,
+      input = in.file,
+      units = new.abund.type,
+      output = out.file,
+      update.snames = "flag"
+    ) %>% execute.commands()
+  }
+}
+file.remove(
+  list.files(path = run.env$link.dir, pattern = "families|abundance", full.names = T)
+)
+file.copy(
+  from = list.files(path = run.env$temp.dir, pattern = "relab", full.names = T),
+  to = run.env$link.dir
+)
+
+```
+
+
+- identify gene families involved in the pathways
+
+```{r unpack humann pathways, eval=F}
+# curr.tool <- "humann_unpack_pathways"
+# show.tool.help(curr.tool)
+# for (sample in run.env$samples) {
+#   sample.files <- list.files(path = run.env$link.dir, pattern = sample, full.names = T)
+#   genes.file <- str_subset(sample.files, pattern = "genefamilies")
+#   paths.file <- str_subset(sample.files, pattern = "coverage")
+#   out.file <- str_replace(genes.file, "genefamilies_relab", "unpacked_pathways_relab")
+#   generate.tool.command(
+#     tool = curr.tool,
+#     input.genes = genes.file,
+#     input.pathways = paths.file,
+#     output = out.file
+#   ) %>% execute.commands()
+# }
+# file.copy(
+#   from = list.files(path = run.env$link.dir, pattern = "unpacked", full.names = T),
+#   to = run.env$temp.dir
+# )
+
+# This was a longer running script for 450 samples so I copied it into a separate R script and ran in the queue
+
+```
+
+```{bash SGE queue submission to run humann_unpack_pathways, eval=F}
+SGE_Batch -c "Rscript humannUnpackPws.R" -q darwin@darwin -P 10 -b 5 -f 50G -r unpackpws_humann
+# job id 9970354
+
+# check files were made
+ls -dq *unpacked* | wc -l
+# 425 files in Results with "unpacked" in file name
+
+```
+
+
+
+- join all the data tables for each sample
+
+```{r join output tables, eval=F}
+# at this point just gonna run this also using the SGE queue system
+
+# curr.tool <- "humann_join_tables"
+# show.tool.help(curr.tool)
+# file.types <- c("genefamilies", "pathabundance", "pathcoverage", "metaphlan_bugs_list")
+# input.dir <- run.env$link.dir
+# output.dir <- run.env$temp.dir
+# for (file.type in file.types) {
+#   out.file <- file.path(output.dir, paste0("all_", file.type, ".tsv"))
+#   if (file.type == "metaphlan_bugs_list") {
+#     join.metaphlan2.tables(input.dir = input.dir, output.file = out.file)
+#   } else {
+#     generate.tool.command(
+#       tool = curr.tool,
+#       input = input.dir,
+#       file_name = file.type,
+#       output = out.file
+#     ) %>% execute.commands()
+#   }
+#   header <- readLines(con = out.file, n = 1) %>% str_remove_all("--R1_kneaddata_paired_1")
+#   body <- readLines(con = out.file)[-1]
+#   writeLines(text = c(header, body), con = out.file)
+# }
+
+```
+
+```{bash SGE queue submission to run humann_join_tables, eval=F}
+SGE_Batch -c "Rscript humannjoinTabs.R" -q darwin@darwin -P 10 -b 5 -f 50G -r jointabs_humann
+# job id 9970801
+
+# check files were made
+# I see 4 files and they look right
+
+```
+
+Now that outputs are made, can use as input table for preliminary analysis in R. Re-organized file/folder system in base project directory metagen_zfBaP so that all these metagenomic processing folders and files are in a directory called 
+"00_MGprocessing" and a copy of the output files for exploratory analysis are in "01_explAnalysis/inputTables". Metadata files are also cleaned up and put into this directory. I also created README files to clarify all the files and directories. Then I backed up the whole project folder to darwin.
+
+```{bash reorganize and back up copies of files, eval=F}
+# in alexieva home directory
+mkdir 00_MGprocessing
+mv metagen_zfBaP/* 00_MGprocessing
+nano 00_MGprocessing/README.txt
+# fill in info on files
+
+mkdir metagen_zfBap/01_explAnalysis
+mkdir metagen_zfBap/01_explAnalysis/inputTables
+mv zfBaP_exploratoryAnalysis.Rmd metagen_zfBap/01_explAnalysis
+cd metagen_zfBap
+cp 00_MGprocessing/Results/all_* 01_explAnalysis/inputTables
+cp 00_MGprocessing/metadata/* 01_explAnalysis/inputTables
+nano 01_explAnalysis/inputTables/README.txt
+# fill with info on what the files all are
+nano 01_explAnalysis/README.txt 
+# fill with info on the files, for now only a few
+
+```
+
+
+

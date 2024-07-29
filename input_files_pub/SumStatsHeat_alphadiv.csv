@@ -1,0 +1,37 @@
+﻿Generation,Treatment,Metric,Estimate,Pval,Significance
+F0,CoMo _BaP,Richness_16S,-0.9774,0.59102, ns
+F0,CoMo _BaP,Shannon_16S,-0.05531,0.500413, ns
+F0,CoMo _BaP,Richness_MG,-2.7778,0.0921, ns
+F0,CoMo _BaP,Shannon_MG,NA,NA, ns
+F0,AHRMo_DMSO,Richness_16S,3.0205,0.0952, ns
+F0,AHRMo_DMSO,Shannon_16S,0.17244,0.080842, ns
+F0,AHRMo_DMSO,Richness_MG,0.5985,0.7619, ns
+F0,AHRMo_DMSO,Shannon_MG,-0.0116,0.5014, ns
+F0,AHRMo_BaP,Richness_16S,-6.7901,0.00177,*
+F0,AHRMo_BaP,Shannon_16S,0.17864,0.126057, ns
+F0,AHRMo_BaP,Richness_MG,3.2972,0.1576, ns
+F0,AHRMo_BaP,Shannon_MG,NA,NA, ns
+F1,CoMo _BaP,Richness_16S,NA,NA, ns
+F1,CoMo _BaP,Shannon_16S,NA,NA, ns
+F1,CoMo _BaP,Richness_MG,-1.371,0.4286, ns
+F1,CoMo _BaP,Shannon_MG,0.0650879,0.000495,*
+F1,AHRMo_DMSO,Richness_16S,-8.57,0.00543,*
+F1,AHRMo_DMSO,Shannon_16S,-0.19131,0.00511,*
+F1,AHRMo_DMSO,Richness_MG,-1.643,0.3531, ns
+F1,AHRMo_DMSO,Shannon_MG,0.0001005,0.995705, ns
+F1,AHRMo_BaP,Richness_16S,NA,NA, ns
+F1,AHRMo_BaP,Shannon_16S,NA,NA, ns
+F1,AHRMo_BaP,Richness_MG,4.4,0.0747, ns
+F1,AHRMo_BaP,Shannon_MG,-0.0391796,0.132463, ns
+F2,CoMo _BaP,Richness_16S,3.2774,0.00207,*
+F2,CoMo _BaP,Shannon_16S,0.25454,0.00218,*
+F2,CoMo _BaP,Richness_MG,NA,NA, ns
+F2,CoMo _BaP,Shannon_MG,0.06022,0.000183,*
+F2,AHRMo_DMSO,Richness_16S,5.8346,1.24E-07,*
+F2,AHRMo_DMSO,Shannon_16S,0.05061,0.52988, ns
+F2,AHRMo_DMSO,Richness_MG,1.736,0.2885, ns
+F2,AHRMo_DMSO,Shannon_MG,0.05949,0.000217,*
+F2,AHRMo_BaP,Richness_16S,NA,NA, ns
+F2,AHRMo_BaP,Shannon_16S,-0.22227,0.04979,*
+F2,AHRMo_BaP,Richness_MG,NA,NA, ns
+F2,AHRMo_BaP,Shannon_MG,-0.05528,0.012027,*

@@ -1,0 +1,61 @@
+{\rtf1\ansi\ansicpg1252\cocoartf2639
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\fnil\fcharset0 HelveticaNeue-Bold;\f1\fnil\fcharset0 HelveticaNeue;}
+{\colortbl;\red255\green255\blue255;}
+{\*\expandedcolortbl;;}
+\margl1440\margr1440\vieww11520\viewh8400\viewkind0
+\deftab560
+\pard\pardeftab560\partightenfactor0
+
+\f0\b\fs40 \cf0 Lisa behavior data notes\
+\pard\pardeftab560\slleading20\partightenfactor0
+
+\f1\b0\fs26 \cf0 \
+In all assays, there is acclimation period in each tank\
+Each fish has a unique identifier that in theory tracks through each assay (col D, but does not connect to microbiome measure)\
+All data will have same structure in the end for each generation\
+There is methylation data but from fish in F3 generation - there are differences between treatments \
+Tank number exists for microbiome data, probably correspond for F1 and F2 but maybe not for F0\
+Behavior ID doesn\'92t track with MB ID but there\'92s a map that can connect them for at least some of the later generations\
+\
+\pard\pardeftab560\slleading20\partightenfactor0
+\cf0 \ul \ulc0 Free swim: \ulnone \
+	Camera with array of 16 tanks viewed from side and it tracks fish swimming over time\
+	how much did it move in total in xy plane (so doesn\'92t matter the path just the distance)\
+	30 min data, chop off first and last few (about 5 min) where they are acclimating and have moved past the main behavior (although she gave us the full data amount, not chopped up)\
+	As they get older, this changes (longer to acclimate) and so they drop points\
+\pard\pardeftab560\slleading20\partightenfactor0
+
+\f0\b \cf0 	Maybe as they get older, neuro degenerates??
+\f1\b0 \
+	After chopping start and end 5 min, it\'92s a linear pattern, so then can take mean (then mean of group and do anova to compare, others do CDF over time but comes to same result)\
+	Look for normality and variation within each generation: generally they are normal but spread around mean can be different (and this round has been same as past times they\'92ve done this)\
+	F1 behavior has had large spread historically and this time; inconsistent F1 in general\
+	If you put a human in a room, don\'92t know where to go; fish freeze at first in acclimation period\
+	Or they explore the tank immediately or after a freeze period\
+	Troll on the bottom after establish safety\
+\
+\pard\pardeftab560\slleading20\partightenfactor0
+\cf0 \ul Shoaling: \ulnone \
+	Four fish per tank, shoaling is how they swim together; chasing behavior and grouping behavior\
+	iid interindiv distance is average of distance between each pair of individuals (group level measure)\
+	nnd is nearest neighbor, based on each fish and how average distance close together they are to nearest other fish in pair then those are averaged for the group (group level measure)\
+	speed of all together as a group; software tracks each fish but they cross over and it switches trajectory a lot, so takes average of all values; cm per min (group level measure) -> hard to interpret on its own because if fish are in opposite directions it can measure that as a zero (high speed could be antisocial fish trying to get away from group)\
+	Lisa looks at speed then checks it with nnd and iid\
+	Can you integrate all three into one shoaling measure??\
+	
+\f0\b Look at whether these measures are correlated with each other or way to integrate into one measure\
+	
+\f1\b0 first five minutes is acclimation time\
+	Could use acclimation period to look into that specific novel environment test but could be too variable because we don\'92t know if there\'92s enough replication to detect strong stat pattern or just there is no effect\
+	Again checking distribution for normality, variation differences across generations, instrument issues, then using means of means with anova\
+\
+\ul Side View, schooling assay:\ulnone \
+	Individual fish in square tanks, 3 walls are opaque and one clear and show them video with other fish\
+	Close far or near to the monitor (zones)\
+	Typical behavior is they move close to monitor\
+	1 min time\
+	Then show predator, would hope they move away from monitor zone\
+	Tends to represent visual accuity to behavior response (vigilance to predators if you find rate at which fish avoids zone of predator)\
+	60 data points before video and 60 points after\
+\
+}
