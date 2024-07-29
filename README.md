@@ -9,3 +9,5 @@ This set of files documents all code used to analyze the data in the paper:
 - zfBaP_PubAnalysis* files are related to metagenomic analysis and graphs
 - zfBaP_behavior* files are related to the fish behavior analysis and graphs
 - zfBaP_microviz is related to the differential abundance analysis and graphs
+
+The .md (markdown) files and/or .Rmd (R markdown) files are the most useful for reading through our code and approach to analysis.
