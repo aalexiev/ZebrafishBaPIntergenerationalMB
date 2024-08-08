@@ -1,0 +1,350 @@
+---
+title: "16S_PreProcessing"
+author: "EbonyStretch"
+output: pdf_document
+---
+
+Currently in the Sharpton lab one of our research projects is understanding the underlining mechanisms that take place when environmental toxicant Benzo[a]pyrene (BaP) alters the zebrafish gut microbiome and how this alteration may elicit behavior changes.
+Our samples include 424 zebrafish embryos that were raised into adults and then allowed to reproduce for a total of three generations ( F0, F1, F2).
+This document serves as the reprocessing necessary for a 16S data analysis.
+This document was ran on a interactive session of the Sharpton's Lab Darwin server maintained by the Center for Quantitative Life Sciences at Oregon State University.
+
+**Document Setup**
+
+Here is a list of all the packages used in this markdown file.
+
+```{r, Load in Packages, echo=FALSE}
+#install.packages is a function is used to create the proper environment. It is used first. Followed by library.
+#library('name of package') loads packages in after they have been installed
+#It is common for versions of a package to no longer work if an update to the system occurs. 
+#It is also common for variations of the same code to be used with different packages, resulting in confusion of the system. Only if errors arise should it be a concern. 
+
+library(tinytex) #helps you knit to pfd
+library(knitr) #required for knitting all types
+library(phyloseq) #manipulates the phyloseq object
+library(ggplot2) # plotting, graphing, and visualizing
+library(vegan) # handles phyloseq objects, hard coding
+library(tidyverse) # everything 
+library(plyr) # data frame manipulation
+library(ellipse) # provides extra options 
+library(ape) # phylogeny trees, taxon 
+library(cowplot) # provides better detail when viewing
+library(RColorBrewer) # nice color options
+library(ggpubr) # publication quality figures, based on ggplot2
+library(DT) # interactive tables in html and markdown
+library(dplyr) # data handling  
+```
+
+Here we assign a directory within our work space in order to manipulate the reads, phyloseq object, and metadata without the risk of altering other files.
+
+```{r,setup, include=FALSE}
+#to add more options for knitting use code below to customize knit
+#str(knitr::opts_chunk$get())
+knitr::opts_chunk$set(echo = TRUE,
+                      eval = TRUE,
+                      message = FALSE)
+
+#setting working directory
+#Place your working directory here after the ~
+setwd("~/Desktop/SharptonLab_Research/BaP_Study")
+
+# using the meta data file as the data frame; sub-setting comes from here
+# This excel file is updated to v16 
+library(readr)
+wbs_metadata <- read_csv("wbs.metadata.csv")
+View(wbs_metadata)
+
+#Directory where the raw files are kept
+raw.seq.dirs <- "/nfs3/Sharpton_Lab/prod/prod_restructure/projects/
+streche/Intergen_tox/FastQs"
+
+#Setting a numerical value for replication by others
+#142 was randomly chosen and can be replaced by any number
+rngseed = TRUE
+set.seed(142)
+```
+
+Loading in the phyloseq object (*phyloseq.rds)* that was produced from DaDa2.
+The phyloseq object is a data set that has been organized and tailored specifically to allow for the manipulation of microbiome data.
+The phyloseq object is comprised of an operational taxonomic unit (OTU) table, taxa table, and meta data.
+
+```{r, phyloseq object}
+#First, click on the phyloseq.rds in files
+#readRDS reads in the phyloseq object made from the DaDa2 pipeline and outputs the summary of whats in it. 
+#This (ps) is the name given to the phyloseq object. It can be anything so long as it is tracked consistently throughout. 
+#run this code to see what it is comprised of before any alterations.
+
+ps <- readRDS("~/Desktop/SharptonLab_Research/BaP_Study/phyloseq.rds") 
+```
+
+**Aquiering Amplicon Sequencing Variants (ASVs)**
+
+Previously we used DaDa2 and Mothur to make our phyloseq object.
+Here we will retrieve and manipulate, the data stored within our phyloseq obect to help us answer our research questions.
+The operating taxonomic units (OTUs) a OTU table is a main component of each pyhloseq object.
+
+The clustering of multiple similar genetic sequences with 97% or greater identity produces OTUs.
+This cluster of sequences are the foundation used to make our amplicon sequencing variant (ASV) table.
+
+Because the ASV table is grouped by nucleotides, it can provide us with deeper information about individual taxon that reside within a sample compared to their community members, this is possible because ASV compartmentalization occurs for each individual taxa.
+
+Once a ASV table is made and loaded we can use this taxonomy table to ask and answer questions about the effects BaP has on the bacteria that live within the zebrafish gut-microbiome.
+
+```{r, Amplicon Sequencing Variant (ASV)}
+#The otu table needs to read in the information stored in the newly made phyloseq object in order to make the asv table. 
+#The left side of the arrow is the name given to the asv table. It can be named anything
+
+#Here a operational taxonomic unit abundance is placed into a table
+asvtab <- otu_table(ps)
+```
+
+Next, a data frame is made using the same metadata file our phyloseq object was made from.
+Data frames embed any information you tell it to.
+Information can be layered into one reusable table.
+The reusable data table is, 'framed' in such a way that rstudio can identify any part of the data information matrix listed within it.
+
+```{r, Data frame}
+# Making a data frame to view the asv table
+# function data.frame takes in the asv table that was just made and produces a table that can be manipulated in order to extract specific information
+asvtab.df <- data.frame(asvtab)
+```
+
+16S rRNA bacterial gene is important to us so we are removing chloroplast and mitochondria so eukaryotic data does not interfere with the analysis nor interpretation of data.
+
+```{r}
+#This code was provided by Ed
+#View taxa table to confirm changes
+View(ps@tax_table)
+ps %>%  
+  tax_select("Chloroplast", "Order", deselect = T) %>%
+  tax_select("Mitochondria", "Family", deselect = T)
+
+#confirm changes were made
+View(ps@tax_table)
+```
+
+**Exploring ASV data**
+
+Here the ASV data exploration includes identifying how the ASV abundance is distributed, filed, and calculated.
+Each sample listed in the SampleID column will be used later in down stream analysis.
+
+```{r, ASV data exploration}
+# colSums will calculate total ASV abundance across samples using the ASV data frame that was made previously
+#names will literally print out the ASVs involved as they sit within the data frame
+sum <- colSums(asvtab.df) 
+
+# sums will show taxa abundance for each ASV listed
+sum
+```
+
+```{r, organizing ASVs}
+#Here, a sort code, 'ifelse' determines if there are ASVs abundance across samples present or not. Then they are binned/embeded for future downstream analysis. 
+bin  <- ifelse( asvtab.df > 1, 1, 0 )
+
+# ASV prevalence
+prev <- colSums(bin)
+```
+
+```{r, ASV prevelance }
+#if you want to see the actual ASV names un-comment the line below
+names(prev)
+
+#Looking at where the ASVs found above fall compared to one another
+ASV.preview <- plot( prev, sum )
+```
+
+**Sequence coverage and distribution**
+
+We want to determine how our sequencing of reads will affect our analysis.
+We will look at the evenness and depth of our reads to determine if rarefying is necessary.
+This figure asks if we have taken enough samples of the DNA we wish to examine.
+If it has an asymptotic curve we have sampled enough.
+
+```{r, rarafraction curve}
+ps.rare <- rarecurve(asvtab.df, step = 1000, cex = 0.5, col = blues9)
+```
+
+Previously DaDa2 trimmed the horizontal lengths of the forward and revers reads but now here we are filtering out the number or reads to an even number.
+We are rarefying by sub-sampling reads to an even depth per sample.
+
+```{r, Sub sampling}
+#Determining a proper value for rarefy, sub-sample & remove shallow reads
+sums <- summary(sample_sums( ps))
+print(sums)
+plot.sums <- sample_sums( ps) 
+
+# Sample sums and rare curve outputs should be used to determine the rarefy depth below
+# VERY IMPORTANT TO VERIFY THE NUMBER OF TAX THAT ARE A RESULT OF THIS CODE
+
+ps.qc <- rarefy_even_depth( ps, sample.size = 10000)
+
+#VERIFY THE NUMBER OF TAX BEFORE YOU MOVE ON; VIEW YOUR PS OBJECT
+print(ps.qc)
+
+#This saves the phyloseq object as a physical object that can be downloaded and shared. 
+saveRDS(ps.qc, file = "ps.qc.rds")
+```
+
+**Species diversity and richness**
+
+The section below is intended to devise a data frame that is made up of the original cvs file with additional layered information.
+Layered information includes, the metadata, filtered reads, diversity index Shannon and Simpson, as well as, observed richness.
+
+```{r, Dataframe of altered ps obj}
+#making a required data frame(df) from the csv file 
+meta <- data.frame(sample_data(ps.qc))
+
+
+#estimating richness of diversity by measuring sample diversity by Shannon & Simpson Index.
+divs <- estimate_richness( ps.qc, measures = c( "Shannon", "Simpson", "Observed"))
+
+
+#combining the information from sub sampling, phyloseq, and asv together
+update <- sample_data( cbind( meta, divs ) )
+
+#meta is the name that will be used down stream in later analysis
+meta <- data.frame(update)
+
+#making a .csv file for use later on
+#this can be downloaded and shared
+write.csv(meta, file = "~/Desktop/SharptonLab_Research/BaP_Study/meta.csv", append = TRUE, row.names = TRUE)
+
+View(meta)
+
+#To see the data frame you have made use view
+#Once loaded one should be able to scroll, left-right, and verify the diversity columns have been added
+```
+
+**Naming & sub-setting**
+
+The metadata needs to be organized according the their respective generational designation.
+Here individual data frames are made with only specific individual generation data.
+The first chunk is the separation of metadata and the second and third chunk is the separation of the phyloseq object.
+
+```{r}
+#generation F0
+#subset the metadata file into generation F0 only
+meta.f0 <- subset(meta, Generation == "F0")
+View(meta.f0)
+
+#saving the data frame for future use
+write.csv(meta.f0, file = "~/Desktop/SharptonLab_Research/BaP_Study/meta.f0.csv", append = TRUE, row.names = TRUE)
+
+#generation F1
+#subset the metadata file into generation F1 only
+meta.f1 <- subset(meta, Generation == "F1")
+View(meta.f1)
+
+#saving the data frame for future use
+write.csv(meta.f1, file = "~/Desktop/SharptonLab_Research/BaP_Study/meta.f1.csv", append = TRUE, row.names = TRUE)
+
+#generation F2
+#subset the metadata file into generation F2 only
+meta.f2 <- subset(meta, Generation == "F2")
+View(meta.f2)
+
+#saving the data frame for future use
+write.csv(meta.f2, file = "~/Desktop/SharptonLab_Research/BaP_Study/meta.f2.csv", append = TRUE, row.names = TRUE)
+```
+
+Naming & sub-setting the phyloseq co-variate according to generation
+
+```{r, phyloseq seperation part one}
+#install the package from github that seperates each variable of choice. 
+install.packages("remotes")
+remotes::install_github("vmikk/metagMisc")
+
+#load in the library
+library(metagMisc)
+
+#choose which data table/frame you wish to be separated
+data(meta)
+
+# Split data by sample type (e.g., Soil, Ocean, etc.=]
+#drop_zeroes is for indicating weather OTUs with zero abundance withing a group of samples should be removed
+GenerationSplit <- (phyloseq_sep_variable(ps.qc, variable = "Generation", drop_zeroes = T))
+
+#View it to be sure change occurred
+GenerationSplit
+```
+
+```{r, phyloseq seperation part two}
+#We are sub-setting by generation so we choose the name in accordance with that, generation 0 is f0. 
+
+#generation F0
+ps.qc.f0 <- GenerationSplit$F0
+ps.qc.f0
+
+#generation f0
+saveRDS(ps.qc.f0, file = "~/Desktop/SharptonLab_Research/BaP_Study/ps.qc.f0.rds")
+
+#generation F1
+ps.qc.f1 <- GenerationSplit$F1
+ps.qc.f1
+
+#generation f1
+saveRDS(ps.qc.f1, file = "~/Desktop/SharptonLab_Research/BaP_Study/ps.qc.f1.rds")
+
+#generation F2
+ps.qc.f2 <- GenerationSplit$F2
+ps.qc.f2
+
+#generation f2
+saveRDS(ps.qc.f2, file = "~/Desktop/SharptonLab_Research/BaP_Study/ps.qc.f2.rds")
+```
+
+**Treatment Groups**
+
+Here treatment groups are made specific to each co-variate in order to visualize what patterns from the data.
+We will combine these with your statistical output for a comprehensive understanding.
+
+```{r, Treatment groups }
+#Here attach is used to let r know other variables will be used from the data frame. This should be what your metadata file is.
+attach(meta)
+
+#Treatments group
+Treatments <- factor(meta$Treatments,
+                 levels = c("BaP+DMSO","AHR2Mo+CoMo","AHR2Mo+BaP","CoMo+DMSO"))
+
+#Generation group
+Generation <- factor(meta$Generation, levels = c("F0", "F1", "F2"))
+
+#Exposure group
+Exposure <- factor(meta$Exposure, levels = c("BaP","DMSO"))
+
+#Morph group
+Morph <- factor(meta$Morph, levels = c("AHR2Mo","CoMo"))
+
+#Gender group
+Sex <- factor(meta$Sex, levels = c("F","M"))
+```
+
+**Preliminary investigation of the data**
+
+To assess where we should focus our efforts we start with looking at a general overview of diversity measurement options.
+
+```{r, alpha diveristy richness plots}
+# Using the same code as above with additional peramiters
+# X = "your dependent variable"
+# Y = "Shannon", "Simpson" or "free_y" meaning none or just counts
+plot_richness(ps.qc.f1, x = "Treatments", color = "Treatments",
+              title = "Sample Richness", 
+              scales = "free_y", 
+              nrow = NULL, 
+              measures = "Observed") 
+plot_richness
+```
+
+As, diversity richness can tell us how many species are present we also want to know how much of each occurs.
+To do this we will estimate sample species abundance.
+
+```{r}
+#plot taxa abundance
+plot_bar(ps.qc.f1, x = "Treatments", y = "Abundance", fill = "Genus") + geom_bar( width = 0.98) 
+
+```
+
+```{r}
+taxa.abund.f1 <- plot_bar(ps.qc.f1, "Genus")
+taxa.abund.f1
+```
